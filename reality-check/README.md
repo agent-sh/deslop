@@ -149,7 +149,7 @@ Provides knowledge for:
 
 ## Installation
 
-The plugin is part of the awsome-slash marketplace. Enable it in your Claude Code settings.
+The plugin is part of the awesome-slash marketplace. Enable it in your Claude Code settings.
 
 ## License
 
