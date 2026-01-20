@@ -161,8 +161,8 @@ function scanGitHubState(options = {}) {
 /**
  * Categorize issues by labels
  *
- * Uses word-boundary matching to avoid false positives (e.g., "debug" won't match "bug").
- * Patterns are checked with word boundaries so "bug-fix" matches "bug" but "debug" does not.
+ * Uses regexes that treat non-letter characters (start/end of string, space, hyphen, colon, etc.)
+ * as boundaries to avoid common false positives (e.g., "debug" won't match "bug", but "bug-fix" will).
  */
 function categorizeIssues(result, issues) {
   const labelMap = {
@@ -643,9 +643,9 @@ function findImplementedFeatures(result, basePath) {
  * @param {Object} options - Collection options
  * @returns {Object} All collected data
  */
-async function collectAllData(options = {}) {
+function collectAllData(options = {}) {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-  const sources = opts.sources;
+  const sources = Array.isArray(opts.sources) ? opts.sources : DEFAULT_OPTIONS.sources;
 
   const data = {
     timestamp: new Date().toISOString(),

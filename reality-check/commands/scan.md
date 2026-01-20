@@ -57,6 +57,27 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
+// Validate options
+const allowedSources = ['github', 'docs', 'code'];
+const allowedDepths = ['quick', 'thorough'];
+const allowedOutputs = ['file', 'display', 'both'];
+
+const invalidSources = options.sources.filter(s => !allowedSources.includes(s));
+if (invalidSources.length > 0) {
+  console.error(`Invalid --sources value(s): ${invalidSources.join(', ')}. Allowed: ${allowedSources.join(', ')}`);
+  process.exit(1);
+}
+
+if (!allowedDepths.includes(options.depth)) {
+  console.error(`Invalid --depth value: ${options.depth}. Allowed: ${allowedDepths.join(', ')}`);
+  process.exit(1);
+}
+
+if (!allowedOutputs.includes(options.output)) {
+  console.error(`Invalid --output value: ${options.output}. Allowed: ${allowedOutputs.join(', ')}`);
+  process.exit(1);
+}
+
 console.log(`
 ## Starting Reality Check Scan
 
