@@ -410,7 +410,7 @@ When docs update is complete, you MUST:
 ║  After completing docs update, you MUST call:                            ║
 ║                                                                          ║
 ║    await Skill({ skill: "ship:ship",                                     ║
-║                  args: "--state-file .claude/workflow-status.json" });   ║
+║                  args: "--state-file ${STATE_DIR}/workflow-status.json" });   ║
 ║                                                                          ║
 ║  /ship will handle:                                                      ║
 ║  - PR creation and push                                                  ║
@@ -451,7 +451,7 @@ Task #${task.id} is ready for PR creation.
 const fs = require('fs');
 
 // 1. Update worktree status
-const statusPath = '.claude/workflow-status.json';
+const statusPath = '${STATE_DIR}/workflow-status.json';
 const status = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
 
 status.steps.push({
@@ -467,7 +467,7 @@ fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
 console.log('✓ Updated workflow-status.json: ready-to-ship');
 
 // 2. Update main repo tasks.json
-const mainRepoTasksPath = status.git.mainRepoPath + '/.claude/tasks.json';
+const mainRepoTasksPath = status.git.mainRepoPath + '/${STATE_DIR}/tasks.json';
 if (fs.existsSync(mainRepoTasksPath)) {
   const registry = JSON.parse(fs.readFileSync(mainRepoTasksPath, 'utf8'));
   const taskIdx = registry.tasks.findIndex(t => t.id === status.task.id);
@@ -480,7 +480,7 @@ if (fs.existsSync(mainRepoTasksPath)) {
 
 // 3. EXPLICITLY invoke /ship
 console.log('\n→ Invoking /ship command...\n');
-await Skill({ skill: "ship:ship", args: "--state-file .claude/workflow-status.json" });
+await Skill({ skill: "ship:ship", args: "--state-file ${STATE_DIR}/workflow-status.json" });
 ```
 
 ## Success Criteria

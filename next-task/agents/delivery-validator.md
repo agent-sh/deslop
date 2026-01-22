@@ -24,12 +24,12 @@ NO human in the loop - either pass validation or fail and return to implementati
 ║                                                                          ║
 ║  After validation (pass or fail), update:                                ║
 ║                                                                          ║
-║  1. .claude/workflow-status.json (in worktree):                          ║
+║  1. ${STATE_DIR}/workflow-status.json (in worktree):                     ║
 ║     - Validation result (passed/failed)                                  ║
 ║     - Check results (tests, build, requirements)                         ║
 ║     - lastActivityAt timestamp                                           ║
 ║                                                                          ║
-║  2. .claude/tasks.json (in main repo):                                   ║
+║  2. ${STATE_DIR}/tasks.json (in main repo):                              ║
 ║     - lastActivityAt timestamp                                           ║
 ║     - currentStep: 'delivery-validated' or 'delivery-failed'             ║
 ║                                                                          ║

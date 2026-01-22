@@ -138,7 +138,7 @@ Add this task to the main repo's tasks.json registry to prevent other workflows 
 
 ```javascript
 const fs = require('fs');
-const TASKS_REGISTRY_PATH = '.claude/tasks.json';
+const TASKS_REGISTRY_PATH = '${STATE_DIR}/tasks.json';
 const MAIN_REPO_PATH = process.cwd(); // Still in main repo at this point
 
 function claimTaskInRegistry(task, branch, worktreePath) {
@@ -207,7 +207,7 @@ Create the workflow-status.json file in this worktree to track steps:
 
 ```javascript
 const fs = require('fs');
-const WORKTREE_STATUS_PATH = '.claude/workflow-status.json';
+const WORKTREE_STATUS_PATH = '${STATE_DIR}/workflow-status.json';
 
 function createWorktreeStatus(task, workflow, branch, mainRepoPath) {
   // Ensure .claude directory exists in worktree
@@ -360,13 +360,13 @@ cleanup_worktree() {
   echo "✓ Pruned worktree references"
 
   # 3. Remove task from registry (CRITICAL)
-  if [ -f ".claude/tasks.json" ]; then
+  if [ -f "${STATE_DIR}/tasks.json" ]; then
     # Use node to safely modify JSON
     node -e "
       const fs = require('fs');
-      const registry = JSON.parse(fs.readFileSync('.claude/tasks.json', 'utf8'));
+      const registry = JSON.parse(fs.readFileSync('${STATE_DIR}/tasks.json', 'utf8'));
       registry.tasks = registry.tasks.filter(t => t.id !== '$TASK_ID');
-      fs.writeFileSync('.claude/tasks.json', JSON.stringify(registry, null, 2));
+      fs.writeFileSync('${STATE_DIR}/tasks.json', JSON.stringify(registry, null, 2));
     "
     echo "✓ Removed task #$TASK_ID from tasks.json registry"
   fi

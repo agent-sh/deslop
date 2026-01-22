@@ -340,7 +340,7 @@ fi
 ### Remove Task from Registry
 
 ```javascript
-// Remove completed task from .claude/tasks.json
+// Remove completed task from ${STATE_DIR}/tasks.json
 if (workflowState) {
   const state = workflowState.readState();
   const mainRepoPath = state?.git?.mainRepoPath || process.cwd();

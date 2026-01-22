@@ -28,7 +28,7 @@ console.log(`Priority Filter: ${policy.priorityFilter}`);
 Before fetching tasks, check which tasks are already claimed by other workflows:
 
 ```javascript
-const TASKS_REGISTRY_PATH = '.claude/tasks.json';
+const TASKS_REGISTRY_PATH = '${STATE_DIR}/tasks.json';
 
 function loadClaimedTasks() {
   try {

@@ -19,12 +19,12 @@ This requires deep understanding, careful implementation, and attention to detai
 ║                                                                          ║
 ║  After EACH implementation step, update:                                 ║
 ║                                                                          ║
-║  1. .claude/workflow-status.json (in worktree):                          ║
+║  1. ${STATE_DIR}/workflow-status.json (in worktree):                          ║
 ║     - Current step number                                                ║
 ║     - Files modified                                                     ║
 ║     - lastActivityAt timestamp                                           ║
 ║                                                                          ║
-║  2. .claude/tasks.json (in main repo):                                   ║
+║  2. ${STATE_DIR}/tasks.json (in main repo):                                   ║
 ║     - lastActivityAt timestamp                                           ║
 ║     - currentStep: 'implementation-step-N'                               ║
 ║                                                                          ║
@@ -65,7 +65,7 @@ Ensure clean state before starting:
 git status --porcelain
 
 # Ensure we're on the correct branch
-EXPECTED_BRANCH=$(cat .claude/workflow-state.json | jq -r '.git.workingBranch')
+EXPECTED_BRANCH=$(cat ${STATE_DIR}/workflow-state.json | jq -r '.git.workingBranch')
 CURRENT_BRANCH=$(git branch --show-current)
 
 if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then

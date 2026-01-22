@@ -238,8 +238,8 @@ If the task source is GitHub, post the plan summary to the issue for documentati
 
 ```bash
 # Get task source from state
-TASK_SOURCE=$(cat .claude/flow.json 2>/dev/null | jq -r '.task.source // "unknown"')
-TASK_ID=$(cat .claude/flow.json 2>/dev/null | jq -r '.task.id // ""')
+TASK_SOURCE=$(cat ${STATE_DIR}/flow.json 2>/dev/null | jq -r '.task.source // "unknown"')
+TASK_ID=$(cat ${STATE_DIR}/flow.json 2>/dev/null | jq -r '.task.id // ""')
 
 if [ "$TASK_SOURCE" = "github" ] && [ -n "$TASK_ID" ]; then
   gh issue comment "$TASK_ID" --body "$(cat <<'EOF'
