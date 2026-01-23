@@ -391,6 +391,16 @@ Select a task (1-5) or provide a custom task:
 **CRITICAL**: You MUST use AskUserQuestion here - do NOT present tasks as text and ask for typed input.
 
 ```javascript
+// Helper to truncate label to 30 chars (OpenCode limit)
+function truncateLabel(num, title) {
+  const prefix = `#${num}: `;
+  const maxTitleLen = 30 - prefix.length;
+  const truncatedTitle = title.length > maxTitleLen
+    ? title.substring(0, maxTitleLen - 1) + '…'
+    : title;
+  return prefix + truncatedTitle;
+}
+
 AskUserQuestion({
   questions: [
     {
@@ -398,19 +408,19 @@ AskUserQuestion({
       question: "Which task should I work on?",
       options: [
         {
-          label: `#${task1.number}: ${task1.title.substring(0, 50)}`,
+          label: truncateLabel(task1.number, task1.title),
           description: `Score: ${score1} | ${task1.labels.slice(0, 3).join(', ')}`
         },
         {
-          label: `#${task2.number}: ${task2.title.substring(0, 50)}`,
+          label: truncateLabel(task2.number, task2.title),
           description: `Score: ${score2} | ${task2.labels.slice(0, 3).join(', ')}`
         },
         {
-          label: `#${task3.number}: ${task3.title.substring(0, 50)}`,
+          label: truncateLabel(task3.number, task3.title),
           description: `Score: ${score3} | ${task3.labels.slice(0, 3).join(', ')}`
         },
         {
-          label: `#${task4.number}: ${task4.title.substring(0, 50)}`,
+          label: truncateLabel(task4.number, task4.title),
           description: `Score: ${score4} | ${task4.labels.slice(0, 3).join(', ')}`
         }
       ],
