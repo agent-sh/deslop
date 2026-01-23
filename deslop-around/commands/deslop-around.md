@@ -1,239 +1,164 @@
 ---
-description: Cleanup AI slop with minimal diffs and behavior preservation
+description: This skill should be used when the user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene", or mentions "AI slop", "code cleanup", "slop detection".
 argument-hint: "[report|apply] [scope-path] [max-changes]"
 ---
 
 # /deslop-around - AI Slop Cleanup
 
-You are a senior maintainer doing periodic repo hygiene. Your mission: remove "AI slop" while preserving behavior and minimizing diffs.
+Senior maintainer performing periodic repo hygiene. Mission: remove AI-generated slop while preserving behavior and minimizing diffs.
 
-## Modes (User Choice)
+## Constraints (Priority Order)
 
-This command supports **two scope modes** - you choose:
+When constraints conflict, follow this priority:
 
-| Mode | Scope | Command |
-|------|-------|---------|
-| **Path-based** | Specific directory/files | `/deslop-around [apply] src/` |
-| **Codebase** | Entire repository | `/deslop-around [apply]` |
-
-For **diff-based cleanup** of new work only, use the `deslop-work` agent via `/next-task`.
+1. **Preserve behavior and public APIs** (highest priority)
+2. **Minimal diffs** - do not reformat unrelated code
+3. **Prefer deletion over invention**
+4. **No new dependencies or abstractions**
+5. **Respect repo conventions** (check CLAUDE.md/AGENTS.md)
 
 ## Arguments
+
+Parse from $ARGUMENTS or use defaults:
 
 - **Mode**: `report` (default) or `apply`
 - **Scope**: Path or glob pattern (default: `.` = codebase)
 - **Max changes**: Number of changesets (default: 5)
 
-Parse from $ARGUMENTS or use defaults.
+For **diff-based cleanup** of new work only, use the `deslop-work` agent via `/next-task`.
 
-## Pre-Context: Platform Detection
+## Output Format
 
-```bash
-# Detect project type and test command
-if [ -f "package.json" ]; then
-  PROJECT_TYPE="nodejs"
-  if command -v npm &> /dev/null; then
-    TEST_CMD="npm test"
-  elif command -v pnpm &> /dev/null; then
-    TEST_CMD="pnpm test"
-  elif command -v yarn &> /dev/null; then
-    TEST_CMD="yarn test"
-  fi
-elif [ -f "requirements.txt" ] || [ -f "pyproject.toml" ]; then
-  PROJECT_TYPE="python"
-  TEST_CMD="pytest"
-elif [ -f "Cargo.toml" ]; then
-  PROJECT_TYPE="rust"
-  TEST_CMD="cargo test"
-elif [ -f "go.mod" ]; then
-  PROJECT_TYPE="go"
-  TEST_CMD="go test ./..."
-else
-  PROJECT_TYPE="unknown"
-  TEST_CMD=""
-fi
+<output_format>
+
+### Report Mode
+
+```markdown
+## Slop Hotspots
+
+| Priority | File | Issue | Severity | Fix |
+|----------|------|-------|----------|-----|
+| 1 | src/api.js:42 | console.log | medium | remove |
+| 2 | src/auth.js:15 | empty catch | high | add_logging |
+
+## Cleanup Plan
+
+1. **Remove debug statements** (3 files, ~10 lines)
+   - Verification: `npm test`
+
+## Do Next
+- [ ] Run `/deslop-around apply` to fix automatically
 ```
 
-## Non-Negotiable Constraints
+### Apply Mode
 
-1. Preserve behavior and public APIs
-2. Minimal diffs - don't reformat unrelated code
-3. Prefer deletion over invention
-4. Do NOT add dependencies or new abstractions
-5. Respect repo conventions (check CLAUDE.md or AGENTS.md if present)
+```markdown
+## Changeset 1: Remove debug statements
 
-## Ignore Zones
+**Changed**: src/api.js, src/utils.js
+**Diff**: -8 lines
 
-- Build artifacts: `dist/`, `build/`, `target/`, `out/`, `.next/`, coverage/
-- Vendored/generated: `vendor/`, `third_party/`, `node_modules/`, `**/*.min.*`, `**/*.gen.*`
-- Lockfiles (unless explicitly in scope)
+**Verification**: npm test ✓
 
-## Pre-Context Commands
+---
 
-Run these and analyze output:
+## Summary
 
-```bash
-git rev-parse --show-toplevel  # Repo root
-git branch --show-current       # Current branch
-git status --porcelain=v1       # Dirty status
-git log --oneline -15          # Recent commits
-git ls-files | wc -l           # File count
+**Files Changed**: 3
+**Lines Removed**: 12
+**Verification**: All passed
+
+### Remaining (manual review needed)
+1. src/config.js:88 - potential hardcoded secret
 ```
 
-## AI Slop Definitions
+</output_format>
 
-Detect and remove patterns from `${CLAUDE_PLUGIN_ROOT}/lib/patterns/slop-patterns.js`.
+## Execution
 
-**Categories detected:**
+### Phase A: Detection
 
-| Category | Examples |
-|----------|----------|
-| Console debugging | `console.log()`, `print()`, `dbg!()`, `println!()` |
-| Old TODOs | Comments with TODO/FIXME >90 days old |
-| Placeholder code | `return 0`, `todo!()`, `raise NotImplementedError` |
-| Empty catch/except | Empty error handlers without logging |
-| Hardcoded secrets | API keys, tokens, credentials |
-| Excessive docs | JSDoc >3x function body length |
-| Phantom references | Issue/PR mentions in comments |
-| Code smells | Boolean blindness, message chains, mutable globals |
+Run the detection script to scan for slop patterns:
 
-**Certainty levels:**
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/detect.js" <scope> --compact
+```
 
-| Level | Action | Description |
-|-------|--------|-------------|
-| **HIGH** | Auto-fix | Direct regex match - definitive slop |
-| **MEDIUM** | Verify context | Multi-pass analysis - review before fixing |
-| **LOW** | Flag only | Heuristic - may be false positive |
+For deep analysis with all multi-pass analyzers:
 
-See pattern library for full regex patterns and language-specific variants.
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/detect.js" <scope> --deep --compact
+```
 
-## Phase A: Map + Diagnose (Always)
+Parse the output to identify top 10 hotspots, sorted by:
+1. Highest certainty first (HIGH before MEDIUM before LOW)
+2. Smallest diff size (lowest risk)
 
-1. Scan files in scope using slop patterns
-2. Identify top 10 "Slop Hotspots":
-   - File path
-   - What's wrong (specific line numbers)
-   - Risk level (low/medium/high)
-   - Proposed fix type (remove/replace/flag)
-3. Sort by smallest-first (lowest risk, highest confidence)
+### Phase B: Report Mode (Default)
 
-## Phase B: Report Mode (Default)
+Present findings as a prioritized cleanup plan:
 
-Output:
-- Prioritized cleanup plan (3-7 steps)
-- For each step:
-  - Files affected
-  - Expected diff size
-  - Estimated risk
-  - Verification command
-- "Do Next" checklist
+1. List 3-7 actionable steps
+2. For each step: files affected, fix type, verification command
+3. End with "Do Next" checklist
 
 **Do NOT modify files in report mode.**
 
-## Phase C: Apply Mode
+### Phase C: Apply Mode
 
-Implement up to MAX_CHANGES changesets:
-
-### Rules for Apply
-
-1. One changeset at a time
-2. Show diff summary after each
-3. Explain verification
-4. Don't mix unrelated changes
-5. Verify with tests/typecheck/lint if available
-6. Stop early if detecting brittle code
-
-### Per Changeset Deliverables
-
-1. What changed (1-3 bullets)
-2. Why it's slop + why new shape is better
-3. Verification commands + results
-4. Concise diff (`git diff --stat` + key hunks)
-
-### Verification Strategy
+Run detection with apply flag for auto-fixable patterns:
 
 ```bash
-# Run test command if available
-if command -v $TEST_CMD >/dev/null 2>&1; then
-  $TEST_CMD
-fi
-
-# Run type check if available
-if [ "$PROJECT_TYPE" = "nodejs" ] && [ -f tsconfig.json ]; then
-  ${PACKAGE_MGR} run check-types || tsc --noEmit
-fi
-
-# Run linter if available
-if [ -f .eslintrc.js ] || [ -f .eslintrc.json ]; then
-  ${PACKAGE_MGR} run lint || eslint .
-fi
+node "${CLAUDE_PLUGIN_ROOT}/scripts/detect.js" <scope> --apply --max <max-changes> --compact
 ```
 
-### Rollback on Failure
+Then implement remaining manual fixes one changeset at a time:
 
-If verification fails:
-```bash
-git restore .
-```
+1. Make the change
+2. Show diff summary (`git diff --stat`)
+3. Run verification
+4. Continue or rollback on failure
 
-Report which changes failed verification and recommend manual review.
+## Ignore Zones
 
-## Final Rollup Summary
+Skip these paths (handled by detection script):
+- Build artifacts: `dist/`, `build/`, `target/`, `out/`, `.next/`
+- Vendored: `vendor/`, `node_modules/`, `**/*.min.*`
+- Generated: `**/*.gen.*`, lockfiles
 
-After all changesets (apply mode only):
+## Verification Strategy
 
-```markdown
-## Cleanup Summary
-
-**Files Changed**: X
-**Lines Deleted**: Y
-**Lines Added**: Z
-**Net Change**: Y - Z
-
-### Verification Results
-- Tests: ✓ Passed / ✗ Failed
-- Type Check: ✓ Passed / ✗ Failed
-- Lint: ✓ Passed / ✗ Failed
-
-### Remaining Hotspots
-1. File: path/to/file.js - Issue description (needs manual review)
-2. ...
-```
-
-## Output Style
-
-Be direct, skeptical, and pragmatic. No fluff. Concrete references only (paths, line numbers, commands).
-
-## Example Usage
+After each changeset, run project's test command:
 
 ```bash
-/deslop-around
-# Report mode: analyze and generate cleanup plan
+# Node.js
+npm test
 
-/deslop-around apply
-# Apply mode: fix up to 5 changesets with verification
+# Python
+pytest
 
-/deslop-around apply src/ 10
-# Apply mode: fix up to 10 changesets in src/ directory
+# Rust
+cargo test
 
-/deslop-around report tests/
-# Report mode: analyze only tests/ directory
+# Go
+go test ./...
 ```
+
+On failure: `git restore .` and report which change failed.
 
 ## Error Handling
 
-- If git not available: Fail with "Git required"
-- If not in git repo: Fail with "Must run in git repository"
-- If scope path doesn't exist: Fail with "Invalid scope path"
-- If verification fails in apply mode: Rollback and report
+- Git not available: Exit with "Git required for rollback safety"
+- Invalid scope path: Exit with "Path not found: <path>"
+- Verification fails: Rollback with `git restore .`, report failure, continue with next changeset
 
-## Important Notes
+## Additional Resources
 
-- Use slop patterns from library (don't hardcode)
-- Adapt verification to detected project type
-- Respect test command from platform detection
-- Always preserve behavior
-- Minimal diffs only
-- No speculation - only fix confirmed slop
+### Reference Files
 
-Begin Phase A now.
+For detailed pattern documentation, consult:
+- **`references/slop-categories.md`** - All pattern categories, severity levels, certainty thresholds, auto-fix strategies
+
+### Scripts
+
+- **`scripts/detect.js`** - Detection pipeline CLI (run with `--help` for options)
