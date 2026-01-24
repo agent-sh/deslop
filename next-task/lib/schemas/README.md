@@ -30,7 +30,7 @@ node lib/schemas/validator.js plugins/next-task/.claude-plugin/plugin.json
 
 # Output on success:
 # ✓ Manifest is valid
-#   Plugin: next-task v2.3.1
+#   Plugin: next-task v3.0.0
 #   Author: Avi Fenesh
 
 # Output on failure:
@@ -125,7 +125,7 @@ Validates `plugin.json` files with the following rules:
 ```json
 {
   "name": "awesome-slash",
-  "version": "2.4.2",
+  "version": "3.0.0",
   "description": "Professional-grade slash commands for Claude Code",
   "author": {
     "name": "Avi Fenesh",
