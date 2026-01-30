@@ -1,7 +1,7 @@
 ---
 name: enhance
 description: Analyze plugins, agents, prompts, docs, hooks, and skills for best-practice gaps
-argument-hint: "[target-path] [--apply] [--focus=TYPE] [--verbose]"
+argument-hint: "[target-path] [--apply] [--focus=TYPE] [--verbose] [--show-suppressed] [--no-learn] [--reset-learned] [--export-learned]"
 ---
 
 # /enhance - Master Enhancement Orchestrator
@@ -26,14 +26,20 @@ Parse from $ARGUMENTS:
 - **--apply**: Apply auto-fixes for HIGH certainty issues after report
 - **--focus=TYPE**: Run only specified enhancer(s): plugin, agent, claudemd/claude-memory, docs, prompt, hooks, skills
 - **--verbose**: Include LOW certainty issues in report
+- **--show-suppressed**: Show what's being filtered by auto-learned suppressions
+- **--no-learn**: Disable auto-learning for this run (analyze but don't save)
+- **--reset-learned**: Clear all auto-learned suppressions for this project
+- **--export-learned**: Export learned suppressions as JSON for team sharing
 
 ## Workflow
 
 1. **Discovery** - Detect what content types exist in target path
-2. **Launch** - Start all relevant enhancers in parallel via Task()
-3. **Aggregate** - Collect and deduplicate findings from all enhancers
-4. **Report** - Generate unified report via enhancement-reporter agent
-5. **Fix** - Apply auto-fixes if --apply flag is present
+2. **Load Suppressions** - Load auto-learned and manual suppressions for project
+3. **Launch** - Start all relevant enhancers in parallel via Task()
+4. **Aggregate** - Collect and deduplicate findings from all enhancers
+5. **Report** - Generate unified report via enhancement-reporter agent
+6. **Auto-Learn** - Detect false positives and save for future runs (unless --no-learn)
+7. **Fix** - Apply auto-fixes if --apply flag is present
 
 ## Implementation
 
@@ -50,8 +56,13 @@ Options:
 - apply: ${args.includes('--apply')}
 - focus: ${focusType || 'all'}
 - verbose: ${args.includes('--verbose')}
+- showSuppressed: ${args.includes('--show-suppressed')}
+- noLearn: ${args.includes('--no-learn')}
+- resetLearned: ${args.includes('--reset-learned')}
+- exportLearned: ${args.includes('--export-learned')}
 
-Discover content, launch enhancers in parallel, aggregate results, and generate report.`
+Discover content, launch enhancers in parallel, aggregate results, and generate report.
+Auto-learning enabled by default - detects and saves false positives for future runs.`
 });
 ```
 
@@ -103,6 +114,19 @@ Discover content, launch enhancers in parallel, aggregate results, and generate 
 
 # Combined flags
 /enhance --focus=plugin --apply --verbose
+
+# Auto-Learning Suppression System
+# See what's being filtered by auto-learned suppressions
+/enhance --show-suppressed
+
+# Run without auto-learning (analyze only, don't save new suppressions)
+/enhance --no-learn
+
+# Reset all learned suppressions for this project
+/enhance --reset-learned
+
+# Export learned suppressions for team sharing
+/enhance --export-learned > suppressions-export.json
 ```
 
 ## Success Criteria
@@ -112,6 +136,9 @@ Discover content, launch enhancers in parallel, aggregate results, and generate 
 - Clear executive summary with counts
 - Auto-fixable issues highlighted
 - Fixes applied only with explicit --apply flag
+- Auto-learning detects false positives with 90%+ confidence
+- Learned suppressions stored in cross-platform location (~/.claude/enhance/suppressions.json)
+- Zero token waste on previously suppressed findings
 
 ---
 
