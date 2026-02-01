@@ -1,6 +1,6 @@
 {
   "name": "sync-docs",
-  "version": "3.7.0-rc.1",
+  "version": "3.7.0-rc.2",
   "description": "Sync documentation with code changes. Find outdated refs, update CHANGELOG, flag stale examples.",
   "author": {
     "name": "Avi Fenesh",
@@ -16,11 +16,5 @@
     "sync",
     "maintenance",
     "code-docs"
-  ],
-  "agents": [
-    "agents/sync-docs-agent.md"
-  ],
-  "skills": [
-    "skills/sync-docs/SKILL.md"
   ]
 }
