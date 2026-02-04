@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { promptPatterns, estimateTokens } = require('./prompt-patterns');
+const { promptPatterns, estimateTokens, extractCodeBlocks } = require('./prompt-patterns');
 const reporter = require('./reporter');
 
 /**
@@ -69,7 +69,8 @@ function analyzePrompt(promptPath, options = {}) {
     exampleIssues: [],
     contextIssues: [],
     outputIssues: [],
-    antiPatternIssues: []
+    antiPatternIssues: [],
+    codeValidationIssues: []
   };
 
   // Read file
@@ -140,6 +141,9 @@ function analyzePrompt(promptPath, options = {}) {
           break;
         case 'anti-pattern':
           results.antiPatternIssues.push(issue);
+          break;
+        case 'code-validation':
+          results.codeValidationIssues.push(issue);
           break;
         default:
           results.structureIssues.push(issue);
@@ -293,6 +297,7 @@ function applyFixes(results, options = {}) {
       allIssues.push(...(r.contextIssues || []));
       allIssues.push(...(r.outputIssues || []));
       allIssues.push(...(r.antiPatternIssues || []));
+      allIssues.push(...(r.codeValidationIssues || []));
     }
   } else {
     allIssues.push(...(results.clarityIssues || []));
@@ -301,6 +306,7 @@ function applyFixes(results, options = {}) {
     allIssues.push(...(results.contextIssues || []));
     allIssues.push(...(results.outputIssues || []));
     allIssues.push(...(results.antiPatternIssues || []));
+    allIssues.push(...(results.codeValidationIssues || []));
   }
 
   // Filter to auto-fixable HIGH certainty issues
@@ -425,5 +431,6 @@ module.exports = {
   fixAggressiveEmphasis,
   generateReport,
   detectPromptType,
-  estimateTokens
+  estimateTokens,
+  extractCodeBlocks
 };

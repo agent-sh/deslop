@@ -16,6 +16,171 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
+// Pre-compiled regex patterns for performance (avoid compiling in hot paths)
+const FENCE_START_REGEX = /^(\s*)```(\w*)\s*$/;
+const FENCE_END_REGEX = /^(\s*)```\s*$/;
+const BAD_EXAMPLE_REGEX = /<bad[_-]?example>([\s\S]*?)<\/bad[_-]?example>/gi;
+
+// Language detection patterns (pre-compiled for code_language_mismatch)
+const LOOKS_LIKE_JSON_START = /^\s*[\[{]/;
+const LOOKS_LIKE_JSON_CONTENT = /[:,]/;
+const NOT_JSON_KEYWORDS = /(function|const|let|var|if|for|while|class)\b/;
+const LOOKS_LIKE_JS = /\b(function|const|let|var|=>|async|await|class|import|export|require)\b/;
+const LOOKS_LIKE_PYTHON = /\b(def\s+\w+|import\s+\w+|from\s+\w+\s+import|class\s+\w+:|if\s+.*:|\s{4}|print\()\b/;
+
+// Memoization caches for performance (keyed by content hash)
+let _lastContent = null;
+let _badExampleRanges = null;
+let _linePositions = null;
+
+/**
+ * Extract fenced code blocks from markdown content
+ * @param {string} content - Markdown content
+ * @returns {Array<{language: string, code: string, startLine: number, endLine: number}>} Array of code blocks
+ */
+function extractCodeBlocks(content) {
+  if (!content || typeof content !== 'string') return [];
+
+  const blocks = [];
+  const lines = content.split('\n');
+  let inCodeBlock = false;
+  let currentBlock = null;
+  let codeLines = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNum = i + 1; // 1-indexed
+
+    // Check for code fence start (``` with optional language)
+    const fenceStartMatch = line.match(FENCE_START_REGEX);
+    const fenceEndMatch = line.match(FENCE_END_REGEX);
+
+    if (!inCodeBlock && fenceStartMatch) {
+      // Start of code block
+      inCodeBlock = true;
+      currentBlock = {
+        language: fenceStartMatch[2] || '', // Empty string if no language
+        startLine: lineNum,
+        indent: fenceStartMatch[1] || ''
+      };
+      codeLines = [];
+    } else if (inCodeBlock && fenceEndMatch) {
+      // End of code block
+      inCodeBlock = false;
+      if (currentBlock) {
+        blocks.push({
+          language: currentBlock.language,
+          code: codeLines.join('\n'),
+          startLine: currentBlock.startLine,
+          endLine: lineNum
+        });
+        currentBlock = null;
+      }
+      codeLines = [];
+    } else if (inCodeBlock) {
+      // Inside code block - collect the code
+      codeLines.push(line);
+    }
+  }
+
+  // Handle unclosed code block at end of file
+  if (inCodeBlock && currentBlock) {
+    blocks.push({
+      language: currentBlock.language,
+      code: codeLines.join('\n'),
+      startLine: currentBlock.startLine,
+      endLine: lines.length
+    });
+  }
+
+  return blocks;
+}
+
+/**
+ * Build bad-example ranges cache for a content string
+ * @param {string} content - Content to analyze
+ * @returns {Array<{start: number, end: number}>} Array of bad-example ranges
+ */
+function buildBadExampleRanges(content) {
+  const ranges = [];
+  const regex = new RegExp(BAD_EXAMPLE_REGEX.source, BAD_EXAMPLE_REGEX.flags);
+  let match;
+
+  while ((match = regex.exec(content)) !== null) {
+    ranges.push({
+      start: match.index,
+      end: match.index + match[0].length
+    });
+  }
+  return ranges;
+}
+
+/**
+ * Build line position cache for a content string
+ * @param {string} content - Content to analyze
+ * @returns {Array<number>} Array of character positions for each line start
+ */
+function buildLinePositions(content) {
+  const positions = [0]; // Line 1 starts at position 0
+  let pos = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '\n') {
+      positions.push(i + 1);
+    }
+  }
+  return positions;
+}
+
+/**
+ * Invalidate cache if content changed
+ * @param {string} content - Current content
+ */
+function ensureCache(content) {
+  if (content !== _lastContent) {
+    _lastContent = content;
+    _badExampleRanges = buildBadExampleRanges(content);
+    _linePositions = buildLinePositions(content);
+  }
+}
+
+/**
+ * Check if a position is inside a bad-example tag (memoized)
+ * @param {string} content - Full content
+ * @param {number} position - Character position to check
+ * @returns {boolean} True if inside bad-example tags
+ */
+function isInsideBadExample(content, position) {
+  if (!content || position < 0) return false;
+
+  ensureCache(content);
+
+  for (const range of _badExampleRanges) {
+    if (position >= range.start && position <= range.end) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Get character position for a line number (memoized)
+ * @param {string} content - Content
+ * @param {number} lineNumber - 1-indexed line number
+ * @returns {number} Character position at start of line
+ */
+function getPositionForLine(content, lineNumber) {
+  if (!content || lineNumber < 1) return 0;
+
+  ensureCache(content);
+
+  const idx = lineNumber - 1;
+  if (idx < _linePositions.length) {
+    return _linePositions[idx];
+  }
+  return _linePositions[_linePositions.length - 1] || 0;
+}
+
 /**
  * Prompt patterns with certainty levels
  * Focuses on prompt quality (not agent-specific frontmatter/config)
@@ -289,18 +454,7 @@ const promptPatterns = {
         };
       }
 
-      // Check for skipped heading levels
-      const headings = content.match(/^(#{1,6})\s+/gm) || [];
-      const levels = headings.map(h => h.trim().split(' ')[0].length);
-
-      for (let i = 1; i < levels.length; i++) {
-        if (levels[i] - levels[i - 1] > 1) {
-          return {
-            issue: `Heading level jumps from H${levels[i - 1]} to H${levels[i]}`,
-            fix: 'Maintain proper heading hierarchy without skipping levels'
-          };
-        }
-      }
+      // Note: Heading hierarchy check moved to heading_hierarchy_gaps pattern
 
       return null;
     }
@@ -928,6 +1082,250 @@ const promptPatterns = {
       }
       return null;
     }
+  },
+
+  // ============================================
+  // CODE VALIDATION PATTERNS (HIGH/MEDIUM certainty)
+  // ============================================
+
+  /**
+   * Invalid JSON in code blocks
+   * HIGH certainty - JSON syntax errors are unambiguous
+   */
+  invalid_json_in_code_block: {
+    id: 'invalid_json_in_code_block',
+    category: 'code-validation',
+    certainty: 'HIGH',
+    autoFix: false,
+    description: 'JSON code block contains invalid JSON syntax',
+    check: (content) => {
+      if (!content || typeof content !== 'string') return null;
+
+      const blocks = extractCodeBlocks(content);
+      const jsonBlocks = blocks.filter(b =>
+        b.language.toLowerCase() === 'json'
+      );
+
+      for (const block of jsonBlocks) {
+        // Skip if inside bad-example tags
+        const position = getPositionForLine(content, block.startLine);
+        if (isInsideBadExample(content, position)) {
+          continue;
+        }
+
+        // Skip empty blocks
+        if (!block.code.trim()) continue;
+
+        // Skip very large blocks (>50KB) for performance
+        if (block.code.length > 50000) continue;
+
+        try {
+          JSON.parse(block.code);
+        } catch (err) {
+          return {
+            issue: `Invalid JSON at line ${block.startLine}: ${err.message}`,
+            fix: 'Fix JSON syntax error in the code block'
+          };
+        }
+      }
+
+      return null;
+    }
+  },
+
+  /**
+   * Invalid JavaScript syntax in code blocks
+   * MEDIUM certainty - uses Function constructor which has limitations
+   */
+  invalid_js_syntax: {
+    id: 'invalid_js_syntax',
+    category: 'code-validation',
+    certainty: 'MEDIUM',
+    autoFix: false,
+    description: 'JavaScript code block contains syntax errors',
+    check: (content) => {
+      if (!content || typeof content !== 'string') return null;
+
+      const blocks = extractCodeBlocks(content);
+      const jsBlocks = blocks.filter(b =>
+        ['js', 'javascript'].includes(b.language.toLowerCase())
+      );
+
+      for (const block of jsBlocks) {
+        // Skip if inside bad-example tags
+        const position = getPositionForLine(content, block.startLine);
+        if (isInsideBadExample(content, position)) {
+          continue;
+        }
+
+        // Skip empty blocks
+        if (!block.code.trim()) continue;
+
+        // Skip very large blocks (>20KB) for performance - Function constructor is slow
+        if (block.code.length > 20000) continue;
+
+        try {
+          // Use Function constructor to check syntax without executing
+          // Note: This doesn't support import/export statements
+          new Function(block.code);
+        } catch (err) {
+          if (err instanceof SyntaxError) {
+            // Check if it's an import/export which Function doesn't support
+            if (/\b(import|export)\b/.test(block.code)) {
+              continue; // Skip - Function constructor doesn't support modules
+            }
+            return {
+              issue: `JavaScript syntax error at line ${block.startLine}: ${err.message}`,
+              fix: 'Fix syntax error in the JavaScript code block (Note: import/export statements are not validated)'
+            };
+          }
+        }
+      }
+
+      return null;
+    }
+  },
+
+  /**
+   * Code language tag mismatch
+   * MEDIUM certainty - heuristic detection may have false positives
+   */
+  code_language_mismatch: {
+    id: 'code_language_mismatch',
+    category: 'code-validation',
+    certainty: 'MEDIUM',
+    autoFix: false,
+    description: 'Code block language tag may not match actual content',
+    check: (content) => {
+      if (!content || typeof content !== 'string') return null;
+
+      const blocks = extractCodeBlocks(content);
+
+      for (const block of blocks) {
+        // Skip blocks without language tag or inside bad-example
+        if (!block.language) continue;
+        const position = getPositionForLine(content, block.startLine);
+        if (isInsideBadExample(content, position)) continue;
+
+        // Skip empty blocks
+        const code = block.code.trim();
+        if (!code) continue;
+
+        const lang = block.language.toLowerCase();
+
+        // JSON detection: starts with { or [ and contains : or ,
+        const looksLikeJson = LOOKS_LIKE_JSON_START.test(code) &&
+                            LOOKS_LIKE_JSON_CONTENT.test(code) &&
+                            !NOT_JSON_KEYWORDS.test(code);
+
+        // JavaScript detection: has JS keywords
+        const looksLikeJs = LOOKS_LIKE_JS.test(code);
+
+        // Python detection: has Python keywords
+        const looksLikePython = LOOKS_LIKE_PYTHON.test(code);
+
+        // Check for clear mismatches
+        if (lang === 'json' && looksLikeJs && !looksLikeJson) {
+          return {
+            issue: `Line ${block.startLine}: Code tagged as JSON but appears to be JavaScript`,
+            fix: 'Change language tag from "json" to "javascript" or "js"'
+          };
+        }
+
+        if (lang === 'json' && looksLikePython && !looksLikeJson) {
+          return {
+            issue: `Line ${block.startLine}: Code tagged as JSON but appears to be Python`,
+            fix: 'Change language tag from "json" to "python"'
+          };
+        }
+
+        if ((lang === 'js' || lang === 'javascript') && looksLikeJson && !looksLikeJs) {
+          return {
+            issue: `Line ${block.startLine}: Code tagged as JavaScript but appears to be JSON`,
+            fix: 'Change language tag to "json"'
+          };
+        }
+
+        if ((lang === 'js' || lang === 'javascript') && looksLikePython && !looksLikeJs) {
+          return {
+            issue: `Line ${block.startLine}: Code tagged as JavaScript but appears to be Python`,
+            fix: 'Change language tag to "python"'
+          };
+        }
+
+        if ((lang === 'python' || lang === 'py') && looksLikeJs && !looksLikePython) {
+          return {
+            issue: `Line ${block.startLine}: Code tagged as Python but appears to be JavaScript`,
+            fix: 'Change language tag to "javascript" or "js"'
+          };
+        }
+      }
+
+      return null;
+    }
+  },
+
+  /**
+   * Heading hierarchy gaps
+   * HIGH certainty - heading levels should not skip
+   */
+  heading_hierarchy_gaps: {
+    id: 'heading_hierarchy_gaps',
+    category: 'structure',
+    certainty: 'HIGH',
+    autoFix: false,
+    description: 'Heading hierarchy skips levels (e.g., H1 to H3 without H2)',
+    check: (content) => {
+      if (!content || typeof content !== 'string') return null;
+
+      // Get code block ranges to exclude headings inside them
+      const codeBlocks = extractCodeBlocks(content);
+      const codeBlockLines = new Set();
+      for (const block of codeBlocks) {
+        for (let line = block.startLine; line <= block.endLine; line++) {
+          codeBlockLines.add(line);
+        }
+      }
+
+      // Extract headings with their levels and line numbers (excluding code blocks)
+      const lines = content.split('\n');
+      const headings = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const lineNum = i + 1;
+        // Skip lines inside code blocks
+        if (codeBlockLines.has(lineNum)) continue;
+
+        const line = lines[i];
+        const match = line.match(/^(#{1,6})\s+(.+)$/);
+        if (match) {
+          headings.push({
+            level: match[1].length,
+            text: match[2].trim(),
+            line: lineNum
+          });
+        }
+      }
+
+      // Need at least 2 headings to check hierarchy
+      if (headings.length < 2) return null;
+
+      // Check for gaps in hierarchy
+      for (let i = 1; i < headings.length; i++) {
+        const current = headings[i];
+        const prev = headings[i - 1];
+
+        // Only check if going to a more nested level
+        if (current.level > prev.level && current.level - prev.level > 1) {
+          return {
+            issue: `Line ${current.line}: Heading jumps from H${prev.level} to H${current.level} (skipped H${prev.level + 1})`,
+            fix: `Add intermediate H${prev.level + 1} heading or adjust heading levels to maintain hierarchy`
+          };
+        }
+      }
+
+      return null;
+    }
   }
 };
 
@@ -986,6 +1384,7 @@ function getAutoFixablePatterns() {
 module.exports = {
   promptPatterns,
   estimateTokens,
+  extractCodeBlocks,
   getAllPatterns,
   getPatternsByCertainty,
   getPatternsByCategory,
