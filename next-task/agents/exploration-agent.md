@@ -86,13 +86,13 @@ function extractKeywords(task) {
 # Search for keyword matches in code
 for keyword in ${KEYWORDS}; do
   echo "=== Searching for: $keyword ==="
-  rg -l -i "$keyword" --type ts --type js --type tsx --type jsx 2>/dev/null | head -10
+  rg -l -i "$keyword" --glob '*.{ts,js,tsx,jsx}' 2>/dev/null | head -10
 done
 
 # Search for identifier matches (exact case)
 for id in ${IDENTIFIERS}; do
   echo "=== Searching for identifier: $id ==="
-  rg -l "$id" --type ts --type js 2>/dev/null | head -10
+  rg -l "$id" --glob '*.{ts,js}' 2>/dev/null | head -10
 done
 ```
 

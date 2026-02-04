@@ -161,7 +161,9 @@ fs.writeFileSync(`${stateDir}/tasks.json`, JSON.stringify(registry, null, 2));
 
 ## Phase 7: Anchor PWD to Worktree
 
-**Important**: Change to the worktree directory to anchor all subsequent operations:
+**Important**: Change to the worktree directory to anchor all subsequent operations.
+
+**Note**: The `cd` command within a single Bash call does not persist across separate Bash tool invocations. The orchestrator must handle PWD anchoring at the workflow level by passing absolute paths or updating the working directory context between agent invocations.
 
 ```bash
 cd "$WORKTREE_PATH"
@@ -175,6 +177,8 @@ fi
 
 echo "[OK] Working directory anchored to: $(pwd)"
 echo "[OK] On branch: $CURRENT_BRANCH"
+# Note: Orchestrator must use this path for subsequent operations
+echo "WORKTREE_ABSOLUTE_PATH=$(pwd)"
 ```
 
 ## Phase 8: Create Worktree Status File

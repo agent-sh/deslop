@@ -225,3 +225,15 @@ Store state at `{stateDir}/review-queue-{timestamp}.json`:
 ```
 
 Delete when approved. Keep when blocked for orchestrator inspection.
+
+## Cross-Platform Compatibility
+
+This skill uses `Task({ subagent_type: ... })` which is Claude Code syntax. For other platforms:
+
+| Platform | Equivalent Syntax |
+|----------|-------------------|
+| Claude Code | `Task({ subagent_type: 'general-purpose', model: 'sonnet', prompt: ... })` |
+| OpenCode | `spawn_agent({ type: 'general-purpose', model: 'sonnet', prompt: ... })` |
+| Codex CLI | `$agent general-purpose --model sonnet --prompt "..."` |
+
+The aggregation and iteration logic remains the same across platforms - only the agent spawning syntax differs.

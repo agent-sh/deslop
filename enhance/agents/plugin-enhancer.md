@@ -43,3 +43,10 @@ This agent is invoked by:
 - `/enhance:plugin` command
 - `/enhance` master orchestrator
 - Phase 9 review loop during workflow
+
+## Model Choice: Sonnet
+
+This agent uses **sonnet** because:
+- Plugin structure validation is pattern-based and deterministic
+- Schema checks don't require deep reasoning
+- Fast execution for structure analysis

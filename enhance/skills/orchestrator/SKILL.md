@@ -49,7 +49,7 @@ Detect what exists in target path:
 
 ```javascript
 const discovery = {
-  plugins: await Glob({ pattern: 'plugins/*/plugin.json', path: targetPath }),
+  plugins: await Glob({ pattern: 'plugins/*/.claude-plugin/plugin.json', path: targetPath }),
   agents: await Glob({ pattern: '**/agents/*.md', path: targetPath }),
   claudemd: await Glob({ pattern: '**/CLAUDE.md', path: targetPath }) ||
             await Glob({ pattern: '**/AGENTS.md', path: targetPath }),
