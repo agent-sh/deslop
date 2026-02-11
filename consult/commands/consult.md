@@ -28,7 +28,7 @@ Parse from $ARGUMENTS:
 - **question**: What to ask the consulted tool (required unless --continue)
 - **--tool**: Target tool: `gemini`, `codex`, `claude`, `opencode`, `copilot` (interactive picker if omitted)
 - **--effort**: Thinking effort: `low`, `medium`, `high`, `max` (interactive picker if omitted)
-- **--model**: Specific model name (overrides effort-based selection). Free text.
+- **--model**: Specific model name (interactive picker if omitted). Free text.
 - **--context**: Auto-include context: `diff` (git diff), `file=PATH` (attach specific file), `none` (default)
 - **--continue**: Continue last consultation session, or `--continue=SESSION_ID` for specific session
 
@@ -52,7 +52,7 @@ If no question text and no `--continue` flag found, show:
 
 ### Phase 2: Interactive Parameter Selection
 
-MUST resolve ALL missing parameters interactively before Phase 3. ONLY skip this phase if ALL of --tool AND --effort are explicitly provided by the user in $ARGUMENTS. Do NOT silently default any parameter.
+MUST resolve ALL missing parameters interactively before Phase 3. ONLY skip this phase if ALL of --tool, --effort, AND --model are explicitly provided by the user in $ARGUMENTS. Do NOT silently default any parameter.
 
 #### Step 2a: Handle --continue
 
@@ -61,59 +61,131 @@ If `--continue` is present:
 2. If the file exists, restore the saved tool, session_id, and model from it
 3. If the file does not exist, show `[WARN] No previous session found` and proceed as a fresh consultation
 
-#### Step 2b: Tool Selection (if no --tool)
+#### Step 2b: Batch Selection (tool + effort)
 
-Detect which tools are installed by running all 5 checks **in parallel** via Bash:
+First, detect which tools are installed by running all 5 checks **in parallel** via Bash:
 
 - `where.exe <tool> 2>nul && echo FOUND || echo NOTFOUND` (Windows)
 - `which <tool> 2>/dev/null && echo FOUND || echo NOTFOUND` (Unix)
 
 Check for: claude, gemini, codex, opencode, copilot.
 
-Then use AskUserQuestion with **only the installed tools** as options:
-
-```
-AskUserQuestion:
-  header: "AI Tool"
-  question: "Which AI tool should I consult?"
-  multiSelect: false
-  options (only if installed):
-    - label: "Claude"       description: "Deep code reasoning"
-    - label: "Gemini"       description: "Fast multimodal analysis"
-    - label: "Codex"        description: "Agentic coding"
-    - label: "OpenCode"     description: "Flexible model choice"
-    - label: "Copilot"      description: "GitHub-integrated AI"
-```
-
 If zero tools are installed: `[ERROR] No AI CLI tools found. Install at least one: npm i -g @anthropic-ai/claude-code, npm i -g @openai/codex, npm i -g opencode-ai`
 
-Map the user's choice to lowercase: "Claude" -> "claude", "Codex" -> "codex", etc.
-
-#### Step 2c: Effort Selection (MUST ask if no --effort)
+Then use a SINGLE AskUserQuestion call to ask all missing parameters at once. Include only the questions for parameters NOT already provided in $ARGUMENTS:
 
 ```
 AskUserQuestion:
-  header: "Effort"
-  question: "What thinking effort level?"
-  multiSelect: false
-  options:
-    - label: "Medium (Recommended)"  description: "Balanced speed and quality"
-    - label: "Low"                   description: "Fast, minimal reasoning"
-    - label: "High"                  description: "Thorough analysis"
-    - label: "Max"                   description: "Maximum reasoning depth"
+  questions:
+    - header: "AI Tool"                          # SKIP if --tool provided
+      question: "Which AI tool should I consult?"
+      multiSelect: false
+      options (only if installed):
+        - label: "Claude"       description: "Deep code reasoning"
+        - label: "Gemini"       description: "Fast multimodal analysis"
+        - label: "Codex"        description: "Agentic coding"
+        - label: "OpenCode"     description: "Flexible model choice"
+        - label: "Copilot"      description: "GitHub-integrated AI"
+
+    - header: "Effort"                           # SKIP if --effort provided
+      question: "What thinking effort level?"
+      multiSelect: false
+      options:
+        - label: "Medium (Recommended)"  description: "Balanced speed and quality"
+        - label: "Low"                   description: "Fast, minimal reasoning"
+        - label: "High"                  description: "Thorough analysis"
+        - label: "Max"                   description: "Maximum reasoning depth"
 ```
 
-Map the user's choice: "Medium (Recommended)" -> "medium", "Low" -> "low", "High" -> "high", "Max" -> "max".
+Map tool choice to lowercase: "Claude" -> "claude", "Codex" -> "codex", etc.
+Map effort choice: "Medium (Recommended)" -> "medium", "Low" -> "low", "High" -> "high", "Max" -> "max".
 
-IMPORTANT: Do NOT skip this step. Do NOT default to "medium" without asking. If --effort was not explicitly provided in $ARGUMENTS, you MUST present this picker before proceeding to Phase 3.
+IMPORTANT: Do NOT skip any missing parameter. Do NOT silently default --effort to "medium" or --tool to any value. Present pickers for ALL unresolved parameters.
+
+#### Step 2c: Model Selection (MUST ask if no --model)
+
+After tool is resolved (from Step 2b or $ARGUMENTS), present a model picker with options specific to the selected tool. The user can always type a custom model name via the "Other" option.
+
+**For Claude:**
+```
+AskUserQuestion:
+  questions:
+    - header: "Model"
+      question: "Which Claude model?"
+      multiSelect: false
+      options:
+        - label: "sonnet (Recommended)"  description: "Sonnet 4.5 - balanced speed and intelligence"
+        - label: "opus"                  description: "Opus 4.6 - most capable, adaptive thinking"
+        - label: "haiku"                 description: "Haiku 4.5 - fastest, lightweight"
+```
+
+**For Gemini:**
+```
+AskUserQuestion:
+  questions:
+    - header: "Model"
+      question: "Which Gemini model?"
+      multiSelect: false
+      options:
+        - label: "gemini-3-pro"          description: "Most capable, strong reasoning"
+        - label: "gemini-3-flash"        description: "Fast, 78% SWE-bench"
+        - label: "gemini-2.5-pro"        description: "Previous gen pro model"
+        - label: "gemini-2.5-flash"      description: "Previous gen flash model"
+```
+
+**For Codex:**
+```
+AskUserQuestion:
+  questions:
+    - header: "Model"
+      question: "Which Codex model?"
+      multiSelect: false
+      options:
+        - label: "gpt-5.3-codex"        description: "Latest, most capable coding model"
+        - label: "gpt-5.2-codex"        description: "Strong coding model"
+        - label: "gpt-5.2"              description: "General purpose GPT-5.2"
+        - label: "gpt-5-codex-mini"     description: "Cost-effective, 4x more usage"
+```
+
+**For OpenCode:**
+```
+AskUserQuestion:
+  questions:
+    - header: "Model"
+      question: "Which model? (type via Other for paid: anthropic/claude-opus-4-6, openai/gpt-5.3-codex)"
+      multiSelect: false
+      options:
+        - label: "opencode/big-pickle"             description: "Free - Zen stealth model, 200K context"
+        - label: "opencode/minimax-m2.1-free"      description: "Free - 230B MoE, strong multilingual coding"
+        - label: "opencode/kimi-k2.5-free"         description: "Free - 1T multimodal, strong coding and agentic"
+        - label: "opencode/trinity-large-preview"  description: "Free - 400B sparse MoE by Arcee AI, 512K context"
+```
+
+**For Copilot:**
+```
+AskUserQuestion:
+  questions:
+    - header: "Model"
+      question: "Which Copilot model?"
+      multiSelect: false
+      options:
+        - label: "claude-sonnet-4-5"        description: "Default Copilot model"
+        - label: "claude-opus-4-6"          description: "Most capable Claude model"
+        - label: "gpt-5.3-codex"              description: "OpenAI GPT-5.3 Codex"
+        - label: "gemini-3-pro"             description: "Google Gemini 3 Pro"
+```
+
+Map the user's choice to the model string (strip " (Recommended)" suffix if present). Pass the selected model to the skill via `--model`.
+
+IMPORTANT: Do NOT skip this step. Do NOT silently use a default model. If --model was not explicitly provided in $ARGUMENTS, you MUST present this picker. The model lists above are current as of Feb 2026 - the user may type any model name supported by their tool via the "Other" option.
 
 ### Phase 3: Invoke Consult Skill
 
-With all parameters resolved (tool, effort, question, and optionally model, context, continue), invoke the `consult` skill using the Skill tool:
+With all parameters resolved (tool, effort, model, question, and optionally context, continue), invoke the `consult` skill using the Skill tool:
 
 ```
 Skill: consult
-Args: "<question>" --tool=<tool> --effort=<effort> [--model=<model>] [--context=<context>] [--continue=<session_id>]
+Args: "<question>" --tool=<tool> --effort=<effort> --model=<model> [--context=<context>] [--continue=<session_id>]
 ```
 
 The skill handles the full consultation lifecycle: it resolves the model from the effort level, builds the CLI command, packages any context, executes the command via Bash with a 120-second timeout, and returns the result between `=== CONSULT_RESULT ===` markers.
