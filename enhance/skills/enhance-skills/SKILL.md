@@ -1,7 +1,7 @@
 ---
 name: enhance-skills
 description: "Use when reviewing SKILL.md files for structure and trigger quality."
-version: 1.0.0
+version: 4.2.0
 argument-hint: "[path] [--fix]"
 ---
 
@@ -272,7 +272,7 @@ Use scoped tool patterns for security:
 ---
 name: skill-name
 description: "Use when..."
-version: 1.0.0
+version: 4.2.0
 ---
 ```
 

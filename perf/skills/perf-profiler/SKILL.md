@@ -1,7 +1,7 @@
 ---
 name: perf-profiler
 description: "Use when profiling CPU/memory hot paths, generating flame graphs, or capturing JFR/perf evidence."
-version: 1.0.0
+version: 4.2.0
 argument-hint: "[tool] [command]"
 ---
 

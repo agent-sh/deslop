@@ -1,7 +1,7 @@
 ---
 name: deslop
 description: "Use when user wants to clean AI slop from code. Use for cleanup, remove debug statements, find ghost code, repo hygiene."
-version: 1.0.0
+version: 4.2.0
 argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
 ---
 
