@@ -1,0 +1,23 @@
+{
+  "name": "@agentsys/deslop",
+  "version": "1.0.0",
+  "description": "AI slop cleanup with minimal diffs and behavior preservation",
+  "author": {
+    "name": "Avi Fenesh",
+    "email": "[email protected]",
+    "url": "https://github.com/avifenesh"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agent-sh/deslop.git"
+  },
+  "homepage": "https://github.com/agent-sh/deslop",
+  "keywords": [
+    "code-quality",
+    "cleanup",
+    "refactoring",
+    "maintenance",
+    "slop-detection"
+  ]
+}

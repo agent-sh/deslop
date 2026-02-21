@@ -1,0 +1,22 @@
+{
+  "name": "deslop",
+  "description": "3-phase AI slop detection: regex patterns (HIGH), multi-pass analyzers (MEDIUM), CLI tools (LOW)",
+  "version": "1.0.0",
+  "owner": {
+    "name": "Avi Fenesh",
+    "url": "https://github.com/avifenesh"
+  },
+  "repository": "https://github.com/agent-sh/deslop",
+  "keywords": [
+    "deslop"
+  ],
+  "plugins": [
+    {
+      "name": "deslop",
+      "source": ".",
+      "description": "3-phase AI slop detection: regex patterns (HIGH), multi-pass analyzers (MEDIUM), CLI tools (LOW)",
+      "version": "1.0.0",
+      "category": "development"
+    }
+  ]
+}
