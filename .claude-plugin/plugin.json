@@ -1,14 +1,14 @@
 {
   "name": "deslop",
-  "version": "1.0.0",
+  "version": "5.1.0",
   "description": "AI slop cleanup with minimal diffs and behavior preservation",
   "author": {
     "name": "Avi Fenesh",
     "email": "[email protected]",
     "url": "https://github.com/avifenesh"
   },
-  "homepage": "https://github.com/agent-sh/deslop",
-  "repository": "https://github.com/agent-sh/deslop",
+  "homepage": "https://github.com/agent-sh/agentsys#deslop",
+  "repository": "https://github.com/agent-sh/agentsys",
   "license": "MIT",
   "keywords": [
     "code-quality",
