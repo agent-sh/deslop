@@ -1,0 +1,25 @@
+{
+  "name": "@agentsys/lib",
+  "version": "4.2.0",
+  "description": "Core library for AgentSys: platform detection, pattern matching, workflow state, and utilities",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Avi Fenesh",
+    "url": "https://github.com/avifenesh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-sh/agentsys.git",
+    "directory": "lib"
+  },
+  "files": [
+    "**/*.js",
+    "**/*.json",
+    "!**/*.test.js"
+  ]
+}
