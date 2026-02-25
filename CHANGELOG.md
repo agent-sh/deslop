@@ -15,6 +15,8 @@
   - `rust_hardcoded_path` - hardcoded absolute paths (/home/, /tmp/, etc.)
   - `rust_expect_production` - .expect() that can panic in production
 - Test infrastructure with Jest (85 tests for Rust patterns)
+- Shell/Bash language support with 10 slop patterns (.sh, .bash, .zsh)
+- 72 tests for Shell patterns
 
 ## [1.0.0] - 2026-02-21
 

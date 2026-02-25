@@ -91,6 +91,21 @@ Empty error match arms silently swallow errors. Always log or propagate.
 Hardcoded paths like `/home/user/config` or `/tmp/cache` break cross-platform portability.
 Use `std::env::temp_dir()`, `dirs::home_dir()`, or configuration for paths.
 
+### Shell/Bash
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| shell_debugging | set -x/set -v debug tracing left enabled | medium |
+| shell_echo_debug | Debug echo statements (DEBUG, TRACE, HERE) | medium |
+| shell_placeholder_todo | Placeholder functions (not implemented, TODO) | high |
+| shell_error_silencing | Error silencing with \|\| true | medium |
+| shell_empty_trap | Empty trap handlers | high |
+| shell_hardcoded_path | Hardcoded user paths (/home/, /Users/) | medium |
+| shell_chmod_777 | Overly permissive chmod 777 | critical |
+| shell_curl_pipe_bash | Piping remote content to shell | critical |
+| shell_unquoted_variable | Unquoted variables in dangerous commands | high |
+| shell_eval_usage | Eval command usage | high |
+
 ### Verbosity Patterns
 
 | Pattern | Examples | Severity |
