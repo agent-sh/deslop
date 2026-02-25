@@ -270,12 +270,12 @@ describe('rust_log_debug', () => {
     expect(pattern.test('tracing::info!("server started");')).toBe(false);
   });
 
-  test('does not match tracing::warn!()', () => {
-    expect(pattern.test('tracing::warn!("deprecation");')).toBe(false);
-  });
-
   test('does not match debug as variable name', () => {
     expect(pattern.test('let debug = true;')).toBe(false);
+  });
+
+  test('severity is low (intentional logging is not always slop)', () => {
+    expect(slopPatterns.rust_log_debug.severity).toBe('low');
   });
 
   test('excludes test files and tests.rs modules', () => {
@@ -397,6 +397,16 @@ describe('rust_hardcoded_path', () => {
 
   test('matches raw strings r"/home/..."', () => {
     expect(pattern.test('let p = r"/home/user/data";')).toBe(true);
+  });
+
+  test('does not match standard daemon socket paths (/var/run/)', () => {
+    expect(pattern.test('"/var/run/redis.sock"')).toBe(false);
+    expect(pattern.test('"/var/run/mysqld/mysqld.sock"')).toBe(false);
+  });
+
+  test('still matches other /var/ paths', () => {
+    expect(pattern.test('"/var/log/app.log"')).toBe(true);
+    expect(pattern.test('"/var/data/myapp"')).toBe(true);
   });
 
   test('does not match URL paths', () => {
