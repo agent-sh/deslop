@@ -10,6 +10,17 @@
 - CMakeLists.txt and meson.build as C/C++ project indicators
 - cppcheck and clang-tidy CLI tool support
 - 93 tests for C/C++ patterns
+- Python language support with 8 new slop detection patterns:
+  - `python_bare_except` - bare except: without exception type
+  - `python_eval_exec` - eval/exec usage
+  - `python_os_system` - os.system calls
+  - `python_chmod_777` - overly permissive file permissions (0o777)
+  - `python_hardcoded_path` - hardcoded user home paths
+  - `python_logging_debug` - logging.basicConfig with DEBUG level
+  - `python_os_environ_debug` - debug prints of os.environ/sys.argv
+  - `python_shell_injection` - subprocess with shell=True
+- Shebang detection for extensionless Python scripts
+- 100 tests for Python patterns
 - Rust language support with 10 slop detection patterns:
   - `rust_debugging` - println!(), dbg!(), eprintln!() debug macros
   - `placeholder_todo_rust` - todo!() and unimplemented!() macros
