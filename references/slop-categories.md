@@ -12,6 +12,8 @@ Detailed reference for all slop patterns detected by the pipeline.
 | Python | `print()`, `import pdb`, `breakpoint()` | medium |
 | Rust | `println!()`, `dbg!()`, `eprintln!()` | medium |
 | Rust | `log::debug!()`, `log::trace!()` | medium |
+| C | `printf("DEBUG ...")`, `fprintf(stderr, "TRACE ...")` | medium |
+| C++ | `std::cout << "DEBUG"`, `std::cerr << "TRACE"` | medium |
 
 **Excludes**: Test files, CLI entry points, config files
 
@@ -41,6 +43,8 @@ Empty error match arms silently swallow errors. Always log or propagate.
 | `todo!()`, `unimplemented!()` | Rust | high |
 | `raise NotImplementedError` | Python | high |
 | `panic("TODO: ...")` | Go | high |
+| `assert(false && "not implemented")` | C | high |
+| `throw runtime_error("not implemented")` | C++ | high |
 | Empty function bodies `{}` | All | high |
 | `pass` only functions | Python | high |
 
@@ -48,7 +52,7 @@ Empty error match arms silently swallow errors. Always log or propagate.
 
 | Pattern | Description | Fix Strategy |
 |---------|-------------|--------------|
-| Empty catch blocks | `catch (e) {}` | add_logging |
+| Empty catch blocks | `catch (e) {}`, `catch (...) {}` (C++) | add_logging |
 | Silent except | `except: pass` | add_logging |
 
 ### Hardcoded Secrets
@@ -110,6 +114,23 @@ Use `std::env::temp_dir()`, `dirs::home_dir()`, `os.path.expanduser("~")`, or `p
 | python_logging_debug | logging.basicConfig with DEBUG level | medium |
 | python_os_environ_debug | Debug prints of os.environ/sys.argv | medium |
 | python_shell_injection | subprocess with shell=True | high |
+
+### C/C++
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| c_printf_debugging | Debug printf/fprintf with DEBUG/TRACE markers | medium |
+| c_ifdef_debug_block | #ifdef DEBUG or #if 0 blocks left in code | low |
+| c_placeholder_todo | assert(false && "TODO") placeholder crashes | high |
+| c_pragma_warning_disable | #pragma warning(disable:...) silencing | medium |
+| c_goto_usage | goto statements (maintainability risk) | low |
+| c_hardcoded_credential_path | Hardcoded /etc/passwd, ~/.ssh/id_rsa paths | critical |
+| c_magic_number_cast | Casts with magic numbers: (void*)0x1234 | medium |
+| cpp_cout_debugging | std::cout/cerr debug output in library code | medium |
+| cpp_throw_not_implemented | throw runtime_error("not implemented") | high |
+| cpp_empty_catch | Empty catch blocks: catch(...) {} | high |
+
+C patterns (prefix `c_`) apply to both C and C++ files. C++ patterns (prefix `cpp_`) apply only to C++ files.
 
 ### Shell/Bash
 

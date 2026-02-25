@@ -3,10 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- C/C++ language support with 10 slop detection patterns:
+  - C (7 patterns): `c_printf_debugging`, `c_ifdef_debug_block`, `c_placeholder_todo`, `c_pragma_warning_disable`, `c_goto_usage`, `c_hardcoded_credential_path`, `c_magic_number_cast`
+  - C++ (3 patterns): `cpp_cout_debugging`, `cpp_throw_not_implemented`, `cpp_empty_catch`
+- Support for C/C++ file extensions (.c, .h, .cpp, .cc, .cxx, .hpp, .hxx)
+- CMakeLists.txt and meson.build as C/C++ project indicators
+- cppcheck and clang-tidy CLI tool support
+- 93 tests for C/C++ patterns
 - Python language support with 8 new slop detection patterns:
   - `python_bare_except` - bare except: without exception type
-  - `python_eval_exec` - eval()/exec() usage
-  - `python_os_system` - os.system() calls
+  - `python_eval_exec` - eval/exec usage
+  - `python_os_system` - os.system calls
   - `python_chmod_777` - overly permissive file permissions (0o777)
   - `python_hardcoded_path` - hardcoded user home paths
   - `python_logging_debug` - logging.basicConfig with DEBUG level
