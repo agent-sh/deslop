@@ -14,6 +14,8 @@ Detailed reference for all slop patterns detected by the pipeline.
 | Rust | `log::debug!()`, `log::trace!()` | medium |
 | C | `printf("DEBUG ...")`, `fprintf(stderr, "TRACE ...")` | medium |
 | C++ | `std::cout << "DEBUG"`, `std::cerr << "TRACE"` | medium |
+| Java | `System.out.println()`, `System.err.println()` | medium |
+| Kotlin | `println()` | medium |
 
 **Excludes**: Test files, CLI entry points, config files
 
@@ -45,6 +47,9 @@ Empty error match arms silently swallow errors. Always log or propagate.
 | `panic("TODO: ...")` | Go | high |
 | `assert(false && "not implemented")` | C | high |
 | `throw runtime_error("not implemented")` | C++ | high |
+| `throw new UnsupportedOperationException()` | Java | high |
+| `throw new RuntimeException("TODO")` | Java | high |
+| `TODO()` | Kotlin | high |
 | Empty function bodies `{}` | All | high |
 | `pass` only functions | Python | high |
 
@@ -131,6 +136,32 @@ Use `std::env::temp_dir()`, `dirs::home_dir()`, `os.path.expanduser("~")`, or `p
 | cpp_empty_catch | Empty catch blocks: catch(...) {} | high |
 
 C patterns (prefix `c_`) apply to both C and C++ files. C++ patterns (prefix `cpp_`) apply only to C++ files.
+
+### Java
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| placeholder_unsupported_java | throw new UnsupportedOperationException() | high |
+| java_sysout_debugging | System.out/err.println() debug output | medium |
+| java_stacktrace_debugging | printStackTrace() - use logging framework | medium |
+| java_throw_todo | RuntimeException("TODO") / IllegalStateException("not implemented") | high |
+| java_return_null_todo | return null; // TODO placeholder | high |
+| java_empty_catch | Empty catch blocks: catch (Exception e) {} | high |
+| java_catch_ignore | catch block with // ignore comment | medium |
+| java_suppress_warnings | @SuppressWarnings("unchecked") | low |
+| java_raw_type | Raw generics without type parameters | low |
+| java_wildcard_catch | Overly broad catch (Exception/Throwable) | low |
+
+### Kotlin
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| kotlin_println_debugging | println() debug output in production code | medium |
+| kotlin_todo_call | TODO() stdlib call - throws at runtime | high |
+| kotlin_fixme_comment | // FIXME comment with placeholder code | medium |
+| kotlin_empty_catch | Empty catch blocks: catch (e: Exception) {} | high |
+| kotlin_swallowed_error | runCatching{}.getOrNull() silently swallows errors | medium |
+| kotlin_suppress_annotation | @Suppress("UNCHECKED_CAST") | low |
 
 ### Shell/Bash
 
