@@ -1,6 +1,6 @@
 /**
  * Tests for C and C++ slop detection patterns
- * Covers all 7 shared C patterns and 3 C++-only patterns
+ * Covers 7 C patterns (6 active, 1 disabled) and 3 C++-only patterns
  */
 
 const {
@@ -273,6 +273,12 @@ describe('c_pragma_warning_disable', () => {
   test('excludes test files', () => {
     expect(isFileExcluded('parser_test.c', exclude)).toBe(true);
   });
+
+  test('excludes vendored deps', () => {
+    expect(isFileExcluded('deps/jemalloc/include/internal.h', exclude)).toBe(true);
+    expect(isFileExcluded('vendor/zlib/zutil.h', exclude)).toBe(true);
+    expect(isFileExcluded('third_party/libc/string.h', exclude)).toBe(true);
+  });
 });
 
 // ============================================================================
@@ -280,31 +286,12 @@ describe('c_pragma_warning_disable', () => {
 // ============================================================================
 
 describe('c_goto_usage', () => {
-  const { pattern, exclude } = slopPatterns.c_goto_usage;
-
-  test('matches goto label;', () => {
-    expect(pattern.test('goto cleanup;')).toBe(true);
+  test('pattern is disabled (null) - goto is idiomatic C', () => {
+    expect(slopPatterns.c_goto_usage.pattern).toBeNull();
   });
 
-  test('matches goto with whitespace', () => {
-    expect(pattern.test('    goto error_handler;')).toBe(true);
-  });
-
-  test('does not match goto in comments', () => {
-    // The pattern matches the word 'goto' followed by identifier and semicolon
-    // A comment line would still match if it has exact format, which is expected
-    // since commented_code pattern handles that separately
-    expect(pattern.test('// avoid goto')).toBe(false);
-  });
-
-  test('does not match "goto" as part of a string', () => {
-    // Without semicolon it should not match
-    expect(pattern.test('"goto is considered harmful"')).toBe(false);
-  });
-
-  test('excludes test files', () => {
-    expect(isFileExcluded('main_test.c', exclude)).toBe(true);
-    expect(isFileExcluded('project/test/cleanup.c', exclude)).toBe(true);
+  test('still registered as a C language pattern', () => {
+    expect(slopPatterns.c_goto_usage.language).toBe('c');
   });
 });
 
