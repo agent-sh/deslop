@@ -566,6 +566,26 @@ describe('java_suppress_warnings', () => {
     expect(pattern.test('@SuppressWarnings')).toBe(false);
   });
 
+  test('does not match @SuppressWarnings("serial")', () => {
+    expect(pattern.test('@SuppressWarnings("serial")')).toBe(false);
+  });
+
+  test('does not match @SuppressWarnings("unused")', () => {
+    expect(pattern.test('@SuppressWarnings("unused")')).toBe(false);
+  });
+
+  test('does not match @SuppressWarnings("ThreadLocalUsage")', () => {
+    expect(pattern.test('@SuppressWarnings("ThreadLocalUsage")')).toBe(false);
+  });
+
+  test('does not match @SuppressWarnings("PMD.TooManyMethods")', () => {
+    expect(pattern.test('@SuppressWarnings("PMD.TooManyMethods")')).toBe(false);
+  });
+
+  test('matches @SuppressWarnings("all")', () => {
+    expect(pattern.test('@SuppressWarnings("all")')).toBe(true);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('FooTest.java', exclude)).toBe(true);
   });
@@ -624,6 +644,16 @@ describe('java_raw_type', () => {
 
   test('does not match List<String> (generic type)', () => {
     expect(pattern.test('List<String> items = new ArrayList<>();')).toBe(false);
+  });
+
+  test('does not match compound class names containing collection type', () => {
+    // Word boundary prevents matching JWKSet, ResultSet, SourceSet, etc.
+    expect(pattern.test('JWKSet jwkSet = new JWKSet(rsaKey);')).toBe(false);
+    expect(pattern.test('ResultSet rs = stmt.executeQuery();')).toBe(false);
+    expect(pattern.test('SourceSet mainSourceSet = java.getSourceSets();')).toBe(false);
+    expect(pattern.test('BitSet bitset = new BitSet();')).toBe(false);
+    expect(pattern.test('EntrySet entrySet;')).toBe(false);
+    expect(pattern.test('KeySet keySet;')).toBe(false);
   });
 
   test('excludes test files', () => {
@@ -724,6 +754,15 @@ describe('kotlin_println_debugging', () => {
   test('excludes main.kt entry point', () => {
     expect(isFileExcluded('main.kt', exclude)).toBe(true);
     expect(isFileExcluded('Main.kt', exclude)).toBe(true);
+  });
+
+  test('excludes Gradle build scripts', () => {
+    expect(isFileExcluded('build.gradle.kts', exclude)).toBe(true);
+    expect(isFileExcluded('settings.gradle', exclude)).toBe(true);
+  });
+
+  test('excludes documentation snippets', () => {
+    expect(isFileExcluded('docs/snippets/Example.kt', exclude)).toBe(true);
   });
 
   test('does not exclude regular source files', () => {
@@ -926,6 +965,26 @@ describe('kotlin_suppress_annotation', () => {
 
   test('does not match @Suppress without opening quote', () => {
     expect(pattern.test('@Suppress')).toBe(false);
+  });
+
+  test('does not match @Suppress("MagicNumber")', () => {
+    expect(pattern.test('@Suppress("MagicNumber")')).toBe(false);
+  });
+
+  test('does not match @Suppress("ForbiddenComment")', () => {
+    expect(pattern.test('@Suppress("ForbiddenComment")')).toBe(false);
+  });
+
+  test('does not match @Suppress("UnstableApiUsage")', () => {
+    expect(pattern.test('@Suppress("UnstableApiUsage")')).toBe(false);
+  });
+
+  test('does not match @Suppress("EnumEntryName")', () => {
+    expect(pattern.test('@Suppress("EnumEntryName")')).toBe(false);
+  });
+
+  test('does not match @Suppress("ktlint:standard:function-naming")', () => {
+    expect(pattern.test('@Suppress("ktlint:standard:function-naming")')).toBe(false);
   });
 
   test('excludes test files', () => {
