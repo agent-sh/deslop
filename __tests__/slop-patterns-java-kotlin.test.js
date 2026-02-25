@@ -83,12 +83,12 @@ describe('Kotlin language integration', () => {
     expect(hasLanguage('kotlin')).toBe(true);
   });
 
-  test('getPatternsForLanguageOnly("kotlin") returns exactly 6 patterns', () => {
+  test('getPatternsForLanguageOnly("kotlin") returns exactly 7 patterns', () => {
     const kotlinOnly = getPatternsForLanguageOnly('kotlin');
-    expect(Object.keys(kotlinOnly)).toHaveLength(6);
+    expect(Object.keys(kotlinOnly)).toHaveLength(7);
   });
 
-  test('all 6 Kotlin pattern names are present', () => {
+  test('all 7 Kotlin pattern names are present', () => {
     const names = Object.keys(getPatternsForLanguageOnly('kotlin'));
     expect(names).toContain('kotlin_println_debugging');
     expect(names).toContain('kotlin_todo_call');
@@ -96,6 +96,7 @@ describe('Kotlin language integration', () => {
     expect(names).toContain('kotlin_empty_catch');
     expect(names).toContain('kotlin_swallowed_error');
     expect(names).toContain('kotlin_suppress_annotation');
+    expect(names).toContain('kotlin_android_debug_log');
   });
 
   test('getPatternsForLanguage("kotlin") includes universal patterns', () => {
@@ -289,6 +290,22 @@ describe('java_sysout_debugging', () => {
 
   test('does not match log4j calls', () => {
     expect(pattern.test('LOG.debug("Entering method");')).toBe(false);
+  });
+
+  test('matches System.out.printf()', () => {
+    expect(pattern.test('System.out.printf("value: %d", x);')).toBe(true);
+  });
+
+  test('matches System.out.format()', () => {
+    expect(pattern.test('System.out.format("value: %s", s);')).toBe(true);
+  });
+
+  test('matches System.err.write()', () => {
+    expect(pattern.test('System.err.write(bytes);')).toBe(true);
+  });
+
+  test('matches System.out.append()', () => {
+    expect(pattern.test('System.out.append("x");')).toBe(true);
   });
 
   test('does not match partial System text', () => {
@@ -586,6 +603,18 @@ describe('java_suppress_warnings', () => {
     expect(pattern.test('@SuppressWarnings("all")')).toBe(true);
   });
 
+  test('matches @SuppressWarnings array form with unchecked', () => {
+    expect(pattern.test('@SuppressWarnings({"unchecked", "rawtypes"})')).toBe(true);
+  });
+
+  test('matches @SuppressWarnings(value = "unchecked")', () => {
+    expect(pattern.test('@SuppressWarnings(value = "unchecked")')).toBe(true);
+  });
+
+  test('does not match array form without target warnings', () => {
+    expect(pattern.test('@SuppressWarnings({"serial"})')).toBe(false);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('FooTest.java', exclude)).toBe(true);
   });
@@ -616,6 +645,26 @@ describe('java_raw_type', () => {
 
   test('matches Iterator iter =', () => {
     expect(pattern.test('Iterator iter = list.iterator();')).toBe(true);
+  });
+
+  test('matches raw HashMap', () => {
+    expect(pattern.test('HashMap map = new HashMap();')).toBe(true);
+  });
+
+  test('matches raw ArrayList', () => {
+    expect(pattern.test('ArrayList list = new ArrayList();')).toBe(true);
+  });
+
+  test('matches raw TreeMap', () => {
+    expect(pattern.test('TreeMap config;')).toBe(true);
+  });
+
+  test('matches raw LinkedList', () => {
+    expect(pattern.test('LinkedList nodes = getNodes();')).toBe(true);
+  });
+
+  test('matches raw ConcurrentHashMap', () => {
+    expect(pattern.test('ConcurrentHashMap cache = new ConcurrentHashMap();')).toBe(true);
   });
 
   test('does not match List<String> items', () => {
@@ -726,6 +775,15 @@ describe('kotlin_println_debugging', () => {
 
   test('matches println with variable', () => {
     expect(pattern.test('println(result)')).toBe(true);
+  });
+
+  test('matches print() without ln', () => {
+    expect(pattern.test('print("test")')).toBe(true);
+  });
+
+  test('does not match sprint or fingerprint', () => {
+    expect(pattern.test('sprint("test")')).toBe(false);
+    expect(pattern.test('fingerprint(data)')).toBe(false);
   });
 
   test('does not match fprintln or similar', () => {
@@ -912,6 +970,18 @@ describe('kotlin_swallowed_error', () => {
     expect(pattern.test('runCatching { fetch() }.onFailure { log(it) }')).toBe(false);
   });
 
+  test('matches runCatching{}.getOrDefault(null)', () => {
+    expect(pattern.test('runCatching { parse(x) }.getOrDefault(null)')).toBe(true);
+  });
+
+  test('matches runCatching{}.getOrElse { null }', () => {
+    expect(pattern.test('runCatching { parse(x) }.getOrElse { null }')).toBe(true);
+  });
+
+  test('does not match runCatching{}.getOrElse with real fallback', () => {
+    expect(pattern.test('runCatching { parse(x) }.getOrElse { fallback }')).toBe(false);
+  });
+
   test('does not match runCatching{}.getOrThrow()', () => {
     expect(pattern.test('runCatching { parse(x) }.getOrThrow()')).toBe(false);
   });
@@ -963,6 +1033,18 @@ describe('kotlin_suppress_annotation', () => {
     expect(pattern.test('@Deprecated("use newMethod instead")')).toBe(false);
   });
 
+  test('matches multi-value with target warning', () => {
+    expect(pattern.test('@Suppress("UNCHECKED_CAST", "ComplexMethod")')).toBe(true);
+  });
+
+  test('matches @file:Suppress("unused")', () => {
+    expect(pattern.test('@file:Suppress("unused")')).toBe(true);
+  });
+
+  test('matches @file:Suppress("UNCHECKED_CAST")', () => {
+    expect(pattern.test('@file:Suppress("UNCHECKED_CAST")')).toBe(true);
+  });
+
   test('does not match @Suppress without opening quote', () => {
     expect(pattern.test('@Suppress')).toBe(false);
   });
@@ -987,8 +1069,65 @@ describe('kotlin_suppress_annotation', () => {
     expect(pattern.test('@Suppress("ktlint:standard:function-naming")')).toBe(false);
   });
 
+  test('does not match @file:Suppress("MagicNumber")', () => {
+    expect(pattern.test('@file:Suppress("MagicNumber")')).toBe(false);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('FooTest.kt', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('src/main/kotlin/Service.kt', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// kotlin_android_debug_log
+// ============================================================================
+
+describe('kotlin_android_debug_log', () => {
+  const { pattern, exclude } = slopPatterns.kotlin_android_debug_log;
+
+  test('matches Log.d()', () => {
+    expect(pattern.test('Log.d(TAG, "debug message")')).toBe(true);
+  });
+
+  test('matches Log.v()', () => {
+    expect(pattern.test('Log.v(TAG, "verbose message")')).toBe(true);
+  });
+
+  test('matches Log.i()', () => {
+    expect(pattern.test('Log.i(TAG, "info message")')).toBe(true);
+  });
+
+  test('matches with leading whitespace', () => {
+    expect(pattern.test('        Log.d(TAG, "debug")')).toBe(true);
+  });
+
+  test('does not match Log.e() (error level)', () => {
+    expect(pattern.test('Log.e(TAG, "error")')).toBe(false);
+  });
+
+  test('does not match Log.w() (warning level)', () => {
+    expect(pattern.test('Log.w(TAG, "warning")')).toBe(false);
+  });
+
+  test('does not match logger.debug()', () => {
+    expect(pattern.test('logger.debug("test")')).toBe(false);
+  });
+
+  test('does not match Timber.d()', () => {
+    expect(pattern.test('Timber.d("debug")')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('FooTest.kt', exclude)).toBe(true);
+    expect(isFileExcluded('src/test/BarTest.kt', exclude)).toBe(true);
+  });
+
+  test('excludes androidTest files', () => {
+    expect(isFileExcluded('src/androidTest/FooTest.kt', exclude)).toBe(true);
   });
 
   test('does not exclude regular source files', () => {
