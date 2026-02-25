@@ -223,6 +223,16 @@ describe('c_placeholder_todo', () => {
     expect(pattern.test('assert(false);')).toBe(false);
   });
 
+  test('matches with long text before keyword (within 200-char limit)', () => {
+    const padding = 'x'.repeat(180);
+    expect(pattern.test(`assert(false && "${padding} not implemented");`)).toBe(true);
+  });
+
+  test('does not match when text exceeds 200-char limit', () => {
+    const padding = 'x'.repeat(210);
+    expect(pattern.test(`assert(false && "${padding} not implemented");`)).toBe(false);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('parser_test.c', exclude)).toBe(true);
     expect(isFileExcluded('src/tests/unit.c', exclude)).toBe(true);
@@ -464,6 +474,16 @@ describe('cpp_throw_not_implemented', () => {
 
   test('does not match throw with variable', () => {
     expect(pattern.test('throw std::runtime_error(error_msg);')).toBe(false);
+  });
+
+  test('matches with long text before keyword (within 200-char limit)', () => {
+    const padding = 'x'.repeat(180);
+    expect(pattern.test(`throw std::runtime_error("${padding} not implemented");`)).toBe(true);
+  });
+
+  test('does not match when text exceeds 200-char limit', () => {
+    const padding = 'x'.repeat(210);
+    expect(pattern.test(`throw std::runtime_error("${padding} not implemented");`)).toBe(false);
   });
 
   test('excludes test files', () => {
