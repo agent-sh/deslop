@@ -11,6 +11,7 @@ Detailed reference for all slop patterns detected by the pipeline.
 | JavaScript | `console.log()`, `console.debug()`, `console.info()` | medium |
 | Python | `print()`, `import pdb`, `breakpoint()` | medium |
 | Rust | `println!()`, `dbg!()`, `eprintln!()` | medium |
+| Rust | `log::debug!()`, `log::trace!()` | medium |
 
 **Excludes**: Test files, CLI entry points, config files
 
@@ -19,13 +20,16 @@ Detailed reference for all slop patterns detected by the pipeline.
 | Pattern | Severity | Better Alternatives |
 |---------|----------|---------------------|
 | `.unwrap()` | medium | `.expect("msg")`, `.unwrap_or(default)`, `?` operator |
+| `.expect("msg")` | medium | `?` operator, explicit match/if-let |
+| `Err(_) => {}` empty match arm | high | Log error, return Err, or propagate |
 
-Bare `.unwrap()` calls can cause panics in production. Prefer:
-- `.expect("descriptive message")` - panic with context
+Bare `.unwrap()` and `.expect()` calls can cause panics in production. Prefer:
+- `?` operator - propagate errors to caller
 - `.unwrap_or(default)` / `.unwrap_or_default()` - provide fallback
 - `.unwrap_or_else(\|\| ...)` - lazy fallback computation
-- `?` operator - propagate errors to caller
 - `.ok()` / `.map()` / `.and_then()` - transform Result/Option
+
+Empty error match arms silently swallow errors. Always log or propagate.
 
 **Excludes**: Test files, examples, benchmarks
 
@@ -75,6 +79,17 @@ Bare `.unwrap()` calls can cause panics in production. Prefer:
 | Message chains | `a.b().c().d().e()` | low |
 | Mutable globals | `let CONSTANT = ...` | high |
 | Dead code | Unreachable after return | high |
+| Unnecessary `.clone()` (Rust) | Review if borrow would suffice | low |
+| `unsafe {}` without `// SAFETY:` (Rust) | Missing justification comment | high |
+
+### Portability Issues
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| Hardcoded absolute paths (Rust) | `"/home/..."`, `"/tmp/..."`, `"/etc/..."` | medium |
+
+Hardcoded paths like `/home/user/config` or `/tmp/cache` break cross-platform portability.
+Use `std::env::temp_dir()`, `dirs::home_dir()`, or configuration for paths.
 
 ### Verbosity Patterns
 
