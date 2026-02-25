@@ -1,6 +1,6 @@
 /**
  * Tests for C and C++ slop detection patterns
- * Covers 7 C patterns (6 active, 1 disabled) and 3 C++-only patterns
+ * Covers 16 C patterns (13 active, 3 disabled) and 6 C++-only patterns
  */
 
 const {
@@ -20,12 +20,12 @@ describe('C language integration', () => {
     expect(hasLanguage('c')).toBe(true);
   });
 
-  test('getPatternsForLanguageOnly("c") returns exactly 7 patterns', () => {
+  test('getPatternsForLanguageOnly("c") returns exactly 16 patterns', () => {
     const cOnly = getPatternsForLanguageOnly('c');
-    expect(Object.keys(cOnly)).toHaveLength(7);
+    expect(Object.keys(cOnly)).toHaveLength(16);
   });
 
-  test('all 7 C pattern names are present', () => {
+  test('all 16 C pattern names are present', () => {
     const names = Object.keys(getPatternsForLanguageOnly('c'));
     expect(names).toContain('c_printf_debugging');
     expect(names).toContain('c_ifdef_debug_block');
@@ -34,6 +34,15 @@ describe('C language integration', () => {
     expect(names).toContain('c_goto_usage');
     expect(names).toContain('c_hardcoded_credential_path');
     expect(names).toContain('c_magic_number_cast');
+    expect(names).toContain('c_sprintf_usage');
+    expect(names).toContain('c_strcpy_usage');
+    expect(names).toContain('c_unsafe_atoi');
+    expect(names).toContain('c_hardcoded_ip');
+    expect(names).toContain('c_hardcoded_debug_path');
+    expect(names).toContain('c_return_avoid_warning');
+    expect(names).toContain('c_debug_fprintf_conditional');
+    expect(names).toContain('c_unchecked_malloc');
+    expect(names).toContain('c_todo_stub_function');
   });
 
   test('getPatternsForLanguage("c") includes universal patterns', () => {
@@ -65,16 +74,19 @@ describe('C++ language integration', () => {
     expect(hasLanguage('cpp')).toBe(true);
   });
 
-  test('getPatternsForLanguageOnly("cpp") returns exactly 3 patterns', () => {
+  test('getPatternsForLanguageOnly("cpp") returns exactly 6 patterns', () => {
     const cppOnly = getPatternsForLanguageOnly('cpp');
-    expect(Object.keys(cppOnly)).toHaveLength(3);
+    expect(Object.keys(cppOnly)).toHaveLength(6);
   });
 
-  test('all 3 C++ pattern names are present', () => {
+  test('all 6 C++ pattern names are present', () => {
     const names = Object.keys(getPatternsForLanguageOnly('cpp'));
     expect(names).toContain('cpp_cout_debugging');
     expect(names).toContain('cpp_throw_not_implemented');
     expect(names).toContain('cpp_empty_catch');
+    expect(names).toContain('cpp_raw_new_delete');
+    expect(names).toContain('cpp_c_style_cast');
+    expect(names).toContain('cpp_fprintf_stderr');
   });
 
   test('getPatternsForLanguage("cpp") includes universal patterns', () => {
@@ -515,5 +527,378 @@ describe('cpp_empty_catch', () => {
   test('does not exclude regular source files', () => {
     expect(isFileExcluded('src/parser.cpp', exclude)).toBe(false);
     expect(isFileExcluded('lib/network.cc', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// c_sprintf_usage
+// ============================================================================
+
+describe('c_sprintf_usage', () => {
+  const { pattern, exclude } = slopPatterns.c_sprintf_usage;
+
+  test('matches sprintf( call', () => {
+    expect(pattern.test('sprintf(buf, "%s:%d", host, port);')).toBe(true);
+  });
+
+  test('matches sprintf with space before paren', () => {
+    expect(pattern.test('sprintf (buffer, "%d", value);')).toBe(true);
+  });
+
+  test('does not match snprintf', () => {
+    expect(pattern.test('snprintf(buf, sizeof(buf), "%s", str);')).toBe(false);
+  });
+
+  test('does not match fprintf', () => {
+    expect(pattern.test('fprintf(stderr, "error");')).toBe(false);
+  });
+
+  test('excludes test files and vendor dirs', () => {
+    expect(isFileExcluded('parser_test.c', exclude)).toBe(true);
+    expect(isFileExcluded('deps/zlib/util.c', exclude)).toBe(true);
+    expect(isFileExcluded('vendor/lz4/lz4.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_strcpy_usage
+// ============================================================================
+
+describe('c_strcpy_usage', () => {
+  const { pattern, exclude } = slopPatterns.c_strcpy_usage;
+
+  test('matches strcpy( call', () => {
+    expect(pattern.test('strcpy(dest, src);')).toBe(true);
+  });
+
+  test('matches strcpy with space before paren', () => {
+    expect(pattern.test('strcpy (buffer, input);')).toBe(true);
+  });
+
+  test('does not match strncpy', () => {
+    expect(pattern.test('strncpy(dest, src, sizeof(dest));')).toBe(false);
+  });
+
+  test('does not match strlcpy', () => {
+    expect(pattern.test('strlcpy(dest, src, sizeof(dest));')).toBe(false);
+  });
+
+  test('excludes test files and deps dirs', () => {
+    expect(isFileExcluded('copy_test.c', exclude)).toBe(true);
+    expect(isFileExcluded('deps/http-parser/http_parser.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_unsafe_atoi
+// ============================================================================
+
+describe('c_unsafe_atoi', () => {
+  const { pattern, exclude } = slopPatterns.c_unsafe_atoi;
+
+  test('matches atoi( call', () => {
+    expect(pattern.test('int port = atoi(argv[1]);')).toBe(true);
+  });
+
+  test('matches atol( call', () => {
+    expect(pattern.test('long val = atol(str);')).toBe(true);
+  });
+
+  test('matches atof( call', () => {
+    expect(pattern.test('double d = atof(input);')).toBe(true);
+  });
+
+  test('does not match strtol', () => {
+    expect(pattern.test('long val = strtol(str, NULL, 10);')).toBe(false);
+  });
+
+  test('does not match strtod', () => {
+    expect(pattern.test('double d = strtod(input, NULL);')).toBe(false);
+  });
+
+  test('excludes vendor dirs', () => {
+    expect(isFileExcluded('vendor/lib/parse.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_hardcoded_ip
+// ============================================================================
+
+describe('c_hardcoded_ip', () => {
+  const { pattern, exclude } = slopPatterns.c_hardcoded_ip;
+
+  test('matches "127.0.0.1"', () => {
+    expect(pattern.test('bind("127.0.0.1", port);')).toBe(true);
+  });
+
+  test('matches "0.0.0.0"', () => {
+    expect(pattern.test('addr = "0.0.0.0";')).toBe(true);
+  });
+
+  test('matches "localhost"', () => {
+    expect(pattern.test("connect('localhost');")).toBe(true);
+  });
+
+  test('does not match IP in a comment without quotes', () => {
+    expect(pattern.test('// connect to 127.0.0.1')).toBe(false);
+  });
+
+  test('does not match other IP addresses', () => {
+    expect(pattern.test('"192.168.1.1"')).toBe(false);
+  });
+
+  test('excludes test and example dirs', () => {
+    expect(isFileExcluded('net_test.c', exclude)).toBe(true);
+    expect(isFileExcluded('project/examples/client.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_hardcoded_debug_path
+// ============================================================================
+
+describe('c_hardcoded_debug_path', () => {
+  const { pattern, exclude } = slopPatterns.c_hardcoded_debug_path;
+
+  test('matches "/tmp/debug.log"', () => {
+    expect(pattern.test('fopen("/tmp/debug.log", "w");')).toBe(true);
+  });
+
+  test('matches "/tmp/output.txt"', () => {
+    expect(pattern.test('path = "/tmp/output.txt";')).toBe(true);
+  });
+
+  test('does not match /tmp/ without filename', () => {
+    expect(pattern.test('dir = "/tmp/";')).toBe(false);
+  });
+
+  test('does not match /var/log path', () => {
+    expect(pattern.test('path = "/var/log/app.log";')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('io_test.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_return_avoid_warning
+// ============================================================================
+
+describe('c_return_avoid_warning', () => {
+  const { pattern, exclude } = slopPatterns.c_return_avoid_warning;
+
+  test('matches return with "avoid warning" comment', () => {
+    expect(pattern.test('return 0; /* avoid unused warning */')).toBe(true);
+  });
+
+  test('matches assignment with "suppress warning" comment', () => {
+    expect(pattern.test('= 0; /* suppress warning about unused */')).toBe(true);
+  });
+
+  test('matches return NULL with "silence warning" comment', () => {
+    expect(pattern.test('return NULL; /* silence compiler warning */')).toBe(true);
+  });
+
+  test('does not match normal return without warning comment', () => {
+    expect(pattern.test('return 0;')).toBe(false);
+  });
+
+  test('does not match return with unrelated comment', () => {
+    expect(pattern.test('return -1; /* error case */')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('util_test.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_debug_fprintf_conditional
+// ============================================================================
+
+describe('c_debug_fprintf_conditional', () => {
+  const { pattern, exclude } = slopPatterns.c_debug_fprintf_conditional;
+
+  test('matches if (debug) fprintf(...)', () => {
+    expect(pattern.test('if (debug) fprintf(stderr, "val=%d", x);')).toBe(true);
+  });
+
+  test('matches if (verbose) printf(...)', () => {
+    expect(pattern.test('if (verbose) printf("info: %s\\n", msg);')).toBe(true);
+  });
+
+  test('matches if (is_debug) { fprintf(...)', () => {
+    expect(pattern.test('if (is_debug) { fprintf(stderr, "trace");')).toBe(true);
+  });
+
+  test('matches if (trace_enabled) printf(...)', () => {
+    expect(pattern.test('if (trace_enabled) printf("entering func");')).toBe(true);
+  });
+
+  test('does not match if (ready) printf(...)', () => {
+    expect(pattern.test('if (ready) printf("Starting server\\n");')).toBe(false);
+  });
+
+  test('does not match if (count > 0) fprintf(...)', () => {
+    expect(pattern.test('if (count > 0) fprintf(out, "results");')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('log_test.c', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// c_unchecked_malloc (multi-pass)
+// ============================================================================
+
+describe('c_unchecked_malloc', () => {
+  test('pattern is null (requires multi-pass analysis)', () => {
+    expect(slopPatterns.c_unchecked_malloc.pattern).toBeNull();
+  });
+
+  test('requiresMultiPass is true', () => {
+    expect(slopPatterns.c_unchecked_malloc.requiresMultiPass).toBe(true);
+  });
+
+  test('registered as a C language pattern', () => {
+    expect(slopPatterns.c_unchecked_malloc.language).toBe('c');
+  });
+
+  test('severity is medium', () => {
+    expect(slopPatterns.c_unchecked_malloc.severity).toBe('medium');
+  });
+});
+
+// ============================================================================
+// c_todo_stub_function (multi-pass)
+// ============================================================================
+
+describe('c_todo_stub_function', () => {
+  test('pattern is null (requires multi-pass analysis)', () => {
+    expect(slopPatterns.c_todo_stub_function.pattern).toBeNull();
+  });
+
+  test('requiresMultiPass is true', () => {
+    expect(slopPatterns.c_todo_stub_function.requiresMultiPass).toBe(true);
+  });
+
+  test('registered as a C language pattern', () => {
+    expect(slopPatterns.c_todo_stub_function.language).toBe('c');
+  });
+
+  test('severity is high', () => {
+    expect(slopPatterns.c_todo_stub_function.severity).toBe('high');
+  });
+});
+
+// ============================================================================
+// cpp_raw_new_delete
+// ============================================================================
+
+describe('cpp_raw_new_delete', () => {
+  const { pattern, exclude } = slopPatterns.cpp_raw_new_delete;
+
+  test('matches new MyClass()', () => {
+    expect(pattern.test('auto p = new MyClass();')).toBe(true);
+  });
+
+  test('matches new int[10]', () => {
+    expect(pattern.test('int* arr = new int[10];')).toBe(true);
+  });
+
+  test('matches delete ptr', () => {
+    expect(pattern.test('delete ptr;')).toBe(true);
+  });
+
+  test('does not match "new" in a string', () => {
+    expect(pattern.test('"create a new object"')).toBe(false);
+  });
+
+  test('does not match std::make_unique', () => {
+    expect(pattern.test('auto p = std::make_unique<MyClass>();')).toBe(false);
+  });
+
+  test('excludes test files and deps', () => {
+    expect(isFileExcluded('alloc_test.cpp', exclude)).toBe(true);
+    expect(isFileExcluded('deps/boost/shared.cpp', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// cpp_c_style_cast
+// ============================================================================
+
+describe('cpp_c_style_cast', () => {
+  const { pattern, exclude } = slopPatterns.cpp_c_style_cast;
+
+  test('matches (void *) cast', () => {
+    expect(pattern.test('ptr = (void *)data;')).toBe(true);
+  });
+
+  test('matches (char *) cast', () => {
+    expect(pattern.test('str = (char *)buf;')).toBe(true);
+  });
+
+  test('matches (const int *) cast', () => {
+    expect(pattern.test('p = (const int *)raw;')).toBe(true);
+  });
+
+  test('matches (uint32_t *) cast', () => {
+    expect(pattern.test('val = (uint32_t *)addr;')).toBe(true);
+  });
+
+  test('matches (unsigned char *) cast', () => {
+    expect(pattern.test('bytes = (unsigned char *)input;')).toBe(true);
+  });
+
+  test('does not match static_cast', () => {
+    expect(pattern.test('p = static_cast<void*>(data);')).toBe(false);
+  });
+
+  test('does not match reinterpret_cast', () => {
+    expect(pattern.test('p = reinterpret_cast<char*>(buf);')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('cast_test.cpp', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// cpp_fprintf_stderr
+// ============================================================================
+
+describe('cpp_fprintf_stderr', () => {
+  const { pattern, exclude } = slopPatterns.cpp_fprintf_stderr;
+
+  test('matches fprintf(stderr, ...)', () => {
+    expect(pattern.test('fprintf(stderr, "error: %s\\n", msg);')).toBe(true);
+  });
+
+  test('matches fprintf( stderr , ...) with extra spaces', () => {
+    expect(pattern.test('fprintf( stderr , "failed");')).toBe(true);
+  });
+
+  test('does not match fprintf(stdout, ...)', () => {
+    expect(pattern.test('fprintf(stdout, "output");')).toBe(false);
+  });
+
+  test('does not match fprintf to file', () => {
+    expect(pattern.test('fprintf(logfile, "msg");')).toBe(false);
+  });
+
+  test('excludes test files, examples, and main files', () => {
+    expect(isFileExcluded('error_test.cpp', exclude)).toBe(true);
+    expect(isFileExcluded('project/examples/demo.cpp', exclude)).toBe(true);
+    expect(isFileExcluded('src/main.cpp', exclude)).toBe(true);
+    expect(isFileExcluded('app/main.cc', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular library source files', () => {
+    expect(isFileExcluded('src/network.cpp', exclude)).toBe(false);
+    expect(isFileExcluded('lib/protocol.cc', exclude)).toBe(false);
   });
 });
