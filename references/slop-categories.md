@@ -87,9 +87,29 @@ Empty error match arms silently swallow errors. Always log or propagate.
 | Pattern | Description | Severity |
 |---------|-------------|----------|
 | Hardcoded absolute paths (Rust) | `"/home/..."`, `"/tmp/..."`, `"/etc/..."` | medium |
+| Hardcoded user paths (Python) | `"/home/user/"`, `"/Users/user/"` | medium |
 
 Hardcoded paths like `/home/user/config` or `/tmp/cache` break cross-platform portability.
-Use `std::env::temp_dir()`, `dirs::home_dir()`, or configuration for paths.
+Use `std::env::temp_dir()`, `dirs::home_dir()`, `os.path.expanduser("~")`, or `pathlib.Path.home()`.
+
+### Python
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| python_debugging | print(), pdb, breakpoint() debug statements | medium |
+| placeholder_not_implemented_py | raise NotImplementedError placeholder | high |
+| placeholder_pass_only_py | Function with only pass statement | high |
+| placeholder_ellipsis_py | Function with only ellipsis (...) | high |
+| empty_except_py | Empty except blocks with pass | high |
+| mutable_globals_py | Mutable global collections (list/dict/set) | high |
+| python_bare_except | Bare except: without exception type | high |
+| python_eval_exec | eval()/exec() usage | high |
+| python_os_system | os.system() calls | medium |
+| python_chmod_777 | os.chmod with 0o777 | high |
+| python_hardcoded_path | Hardcoded /home/ or /Users/ paths | medium |
+| python_logging_debug | logging.basicConfig with DEBUG level | medium |
+| python_os_environ_debug | Debug prints of os.environ/sys.argv | medium |
+| python_shell_injection | subprocess with shell=True | high |
 
 ### Shell/Bash
 
