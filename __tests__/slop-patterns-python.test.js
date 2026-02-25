@@ -65,26 +65,34 @@ describe('Python language integration', () => {
 });
 
 // ============================================================================
-// python_debugging - print(), pdb, breakpoint(), ipdb
+// python_debugging - pdb, ipdb, breakpoint() (print() excluded - legitimate in CLIs)
 // ============================================================================
 
 describe('python_debugging', () => {
   const { pattern, exclude } = slopPatterns.python_debugging;
 
-  test('matches print()', () => {
-    expect(pattern.test('print("debug value")')).toBe(true);
-  });
-
   test('matches import pdb', () => {
     expect(pattern.test('import pdb')).toBe(true);
+  });
+
+  test('matches import ipdb', () => {
+    expect(pattern.test('import ipdb')).toBe(true);
   });
 
   test('matches breakpoint()', () => {
     expect(pattern.test('breakpoint()')).toBe(true);
   });
 
-  test('matches import ipdb', () => {
-    expect(pattern.test('import ipdb')).toBe(true);
+  test('matches pdb.set_trace()', () => {
+    expect(pattern.test('pdb.set_trace()')).toBe(true);
+  });
+
+  test('does not match print() - legitimate in CLIs', () => {
+    expect(pattern.test('print("hello world")')).toBe(false);
+  });
+
+  test('does not match print in function name', () => {
+    expect(pattern.test('def print_report():')).toBe(false);
   });
 
   test('excludes test files', () => {
@@ -208,20 +216,20 @@ describe('mutable_globals_py', () => {
     expect(pattern.test('CACHE = []')).toBe(true);
   });
 
-  test('matches UPPERCASE = {}', () => {
-    expect(pattern.test('REGISTRY = {}')).toBe(true);
-  });
-
-  test('matches UPPERCASE = dict()', () => {
-    expect(pattern.test('CONFIG = dict()')).toBe(true);
-  });
-
   test('matches UPPERCASE = list()', () => {
     expect(pattern.test('ITEMS = list()')).toBe(true);
   });
 
-  test('matches UPPERCASE = set()', () => {
-    expect(pattern.test('SEEN = set()')).toBe(true);
+  test('does not match UPPERCASE = {} (standard Python constant pattern)', () => {
+    expect(pattern.test('REGISTRY = {}')).toBe(false);
+  });
+
+  test('does not match UPPERCASE = dict() (standard Python constant pattern)', () => {
+    expect(pattern.test('CONFIG = dict()')).toBe(false);
+  });
+
+  test('does not match UPPERCASE = set()', () => {
+    expect(pattern.test('SEEN = set()')).toBe(false);
   });
 
   test('does not match lowercase = []', () => {
@@ -232,9 +240,11 @@ describe('mutable_globals_py', () => {
     expect(pattern.test('NAME = "hello"')).toBe(false);
   });
 
-  test('excludes constants.py and settings.py', () => {
+  test('excludes constants.py, settings.py, config.py, defaults.py', () => {
     expect(isFileExcluded('constants.py', exclude)).toBe(true);
     expect(isFileExcluded('settings.py', exclude)).toBe(true);
+    expect(isFileExcluded('config.py', exclude)).toBe(true);
+    expect(isFileExcluded('defaults.py', exclude)).toBe(true);
   });
 
   test('excludes test files and directories', () => {
@@ -318,6 +328,11 @@ describe('python_eval_exec', () => {
     expect(pattern.test('"Do not use eval"')).toBe(false);
   });
 
+  test('does not match pattern inside Python comments', () => {
+    expect(pattern.test('# result = eval(user_input)')).toBe(false);
+    expect(pattern.test('  # cls could be anything, even eval().')).toBe(false);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('test_parser.py', exclude)).toBe(true);
     expect(isFileExcluded('parser_test.py', exclude)).toBe(true);
@@ -343,7 +358,8 @@ describe('python_os_system', () => {
     expect(pattern.test('os.system(cmd)')).toBe(true);
   });
 
-  test('does not match os.system without call parens', () => {
+  test('does not match os.system in comments', () => {
+    expect(pattern.test('# os.system("rsync /data host")')).toBe(false);
     expect(pattern.test('# use os.system for commands')).toBe(false);
   });
 
@@ -423,6 +439,11 @@ describe('python_hardcoded_path', () => {
 
   test('does not match /tmp paths', () => {
     expect(pattern.test('"/tmp/cache"')).toBe(false);
+  });
+
+  test('does not match paths in comments', () => {
+    expect(pattern.test("# Example: '/home/media/media.lawrence.com/'")).toBe(false);
+    expect(pattern.test('# path = "/Users/johndoe/data"')).toBe(false);
   });
 
   test('excludes test files', () => {
