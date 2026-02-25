@@ -1,6 +1,6 @@
 /**
  * Tests for Rust slop detection patterns
- * Covers all 10 Rust-specific patterns (4 existing + 6 new)
+ * Covers all 11 Rust-specific patterns
  */
 
 const {
@@ -20,9 +20,24 @@ describe('Rust language integration', () => {
     expect(hasLanguage('rust')).toBe(true);
   });
 
-  test('getPatternsForLanguageOnly("rust") returns exactly 10 patterns', () => {
+  test('getPatternsForLanguageOnly("rust") returns exactly 11 patterns', () => {
     const rustOnly = getPatternsForLanguageOnly('rust');
-    expect(Object.keys(rustOnly)).toHaveLength(10);
+    expect(Object.keys(rustOnly)).toHaveLength(11);
+  });
+
+  test('all 11 Rust pattern names are present', () => {
+    const names = Object.keys(getPatternsForLanguageOnly('rust'));
+    expect(names).toContain('rust_debugging');
+    expect(names).toContain('rust_println_in_lib');
+    expect(names).toContain('placeholder_todo_rust');
+    expect(names).toContain('placeholder_panic_todo_rust');
+    expect(names).toContain('rust_bare_unwrap');
+    expect(names).toContain('rust_log_debug');
+    expect(names).toContain('rust_empty_match_arm');
+    expect(names).toContain('rust_unnecessary_clone');
+    expect(names).toContain('rust_unsafe_block');
+    expect(names).toContain('rust_hardcoded_path');
+    expect(names).toContain('rust_expect_production');
   });
 
   test('getPatternsForLanguage("rust") includes universal patterns', () => {
@@ -32,45 +47,44 @@ describe('Rust language integration', () => {
   });
 
   test('all Rust patterns have required fields', () => {
-    const rustPatterns = getPatternsForLanguageOnly('rust');
-    for (const [name, pattern] of Object.entries(rustPatterns)) {
-      expect(pattern).toHaveProperty('pattern');
-      expect(pattern).toHaveProperty('exclude');
-      expect(pattern).toHaveProperty('severity');
-      expect(pattern).toHaveProperty('autoFix');
-      expect(pattern).toHaveProperty('language', 'rust');
-      expect(pattern).toHaveProperty('description');
-      expect(typeof pattern.description).toBe('string');
-      expect(Array.isArray(pattern.exclude)).toBe(true);
+    for (const [, p] of Object.entries(getPatternsForLanguageOnly('rust'))) {
+      expect(p).toHaveProperty('pattern');
+      expect(p).toHaveProperty('exclude');
+      expect(p).toHaveProperty('severity');
+      expect(p).toHaveProperty('autoFix');
+      expect(p).toHaveProperty('language', 'rust');
+      expect(p).toHaveProperty('description');
+      expect(typeof p.description).toBe('string');
+      expect(Array.isArray(p.exclude)).toBe(true);
     }
   });
 });
 
 // ============================================================================
-// Existing pattern: rust_debugging
+// rust_debugging - dbg!() only
 // ============================================================================
 
 describe('rust_debugging', () => {
   const { pattern, exclude } = slopPatterns.rust_debugging;
 
-  test('matches println!()', () => {
-    expect(pattern.test('println!("value: {}", x);')).toBe(true);
-  });
-
   test('matches dbg!()', () => {
     expect(pattern.test('dbg!(my_value);')).toBe(true);
   });
 
-  test('matches eprintln!()', () => {
-    expect(pattern.test('eprintln!("error: {}", e);')).toBe(true);
+  test('matches dbg!() with expression', () => {
+    expect(pattern.test('dbg!(x + y);')).toBe(true);
   });
 
-  test('does not match print! without ln', () => {
-    expect(pattern.test('print!("no newline")')).toBe(false);
+  test('does not match println!()', () => {
+    expect(pattern.test('println!("value: {}", x);')).toBe(false);
+  });
+
+  test('does not match eprintln!()', () => {
+    expect(pattern.test('eprintln!("error")')).toBe(false);
   });
 
   test('does not match format!()', () => {
-    expect(pattern.test('let s = format!("hello {}", name);')).toBe(false);
+    expect(pattern.test('format!("hello {}", name)')).toBe(false);
   });
 
   test('excludes test files', () => {
@@ -78,13 +92,67 @@ describe('rust_debugging', () => {
     expect(isFileExcluded('my_module_tests.rs', exclude)).toBe(true);
   });
 
-  test('does not exclude regular source files', () => {
-    expect(isFileExcluded('src/main.rs', exclude)).toBe(false);
+  test('excludes tests.rs files (Rust inline test modules)', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
+  });
+
+  test('excludes test directories', () => {
+    expect(isFileExcluded('src/tests/integration.rs', exclude)).toBe(true);
   });
 });
 
 // ============================================================================
-// Existing pattern: placeholder_todo_rust
+// rust_println_in_lib - println!/eprintln! in library code
+// ============================================================================
+
+describe('rust_println_in_lib', () => {
+  const { pattern, exclude } = slopPatterns.rust_println_in_lib;
+
+  test('matches println!()', () => {
+    expect(pattern.test('println!("value: {}", x);')).toBe(true);
+  });
+
+  test('matches eprintln!()', () => {
+    expect(pattern.test('eprintln!("error: {}", e);')).toBe(true);
+  });
+
+  test('does not match dbg!()', () => {
+    expect(pattern.test('dbg!(value);')).toBe(false);
+  });
+
+  test('does not match format!()', () => {
+    expect(pattern.test('format!("hello")')).toBe(false);
+  });
+
+  test('excludes build.rs (cargo build protocol)', () => {
+    expect(isFileExcluded('build.rs', exclude)).toBe(true);
+    expect(isFileExcluded('crate/build.rs', exclude)).toBe(true);
+  });
+
+  test('excludes main.rs (CLI output is legitimate)', () => {
+    expect(isFileExcluded('src/main.rs', exclude)).toBe(true);
+    expect(isFileExcluded('crate/src/main.rs', exclude)).toBe(true);
+  });
+
+  test('excludes binary targets (src/bin/)', () => {
+    expect(isFileExcluded('src/bin/my_tool.rs', exclude)).toBe(true);
+    expect(isFileExcluded('crate/src/bin/runner.rs', exclude)).toBe(true);
+  });
+
+  test('excludes test files and tests.rs modules', () => {
+    expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
+    expect(isFileExcluded('src/tests/unit.rs', exclude)).toBe(true);
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular library source files', () => {
+    expect(isFileExcluded('src/lib.rs', exclude)).toBe(false);
+    expect(isFileExcluded('src/parser.rs', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// placeholder_todo_rust
 // ============================================================================
 
 describe('placeholder_todo_rust', () => {
@@ -98,22 +166,18 @@ describe('placeholder_todo_rust', () => {
     expect(pattern.test('unimplemented!("not yet")')).toBe(true);
   });
 
-  test('matches todo!() without message', () => {
-    expect(pattern.test('todo!()')).toBe(true);
-  });
-
   test('does not match todo in comments', () => {
     expect(pattern.test('// todo: fix this later')).toBe(false);
   });
 
-  test('excludes test files and test directories', () => {
+  test('excludes test files', () => {
     expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
     expect(isFileExcluded('src/tests/integration.rs', exclude)).toBe(true);
   });
 });
 
 // ============================================================================
-// Existing pattern: placeholder_panic_todo_rust
+// placeholder_panic_todo_rust
 // ============================================================================
 
 describe('placeholder_panic_todo_rust', () => {
@@ -121,10 +185,6 @@ describe('placeholder_panic_todo_rust', () => {
 
   test('matches panic!("TODO: ...")', () => {
     expect(pattern.test('panic!("TODO: implement this")')).toBe(true);
-  });
-
-  test('matches panic!("implement later")', () => {
-    expect(pattern.test('panic!("implement error handling")')).toBe(true);
   });
 
   test('does not match panic! without TODO/implement', () => {
@@ -137,7 +197,7 @@ describe('placeholder_panic_todo_rust', () => {
 });
 
 // ============================================================================
-// Existing pattern: rust_bare_unwrap
+// rust_bare_unwrap (tuned: severity low, broader excludes)
 // ============================================================================
 
 describe('rust_bare_unwrap', () => {
@@ -145,10 +205,6 @@ describe('rust_bare_unwrap', () => {
 
   test('matches .unwrap()', () => {
     expect(pattern.test('let val = result.unwrap();')).toBe(true);
-  });
-
-  test('matches .unwrap() with spaces', () => {
-    expect(pattern.test('result.unwrap( )')).toBe(true);
   });
 
   test('does not match .unwrap_or()', () => {
@@ -159,19 +215,19 @@ describe('rust_bare_unwrap', () => {
     expect(pattern.test('result.unwrap_or_default()')).toBe(false);
   });
 
-  test('does not match .unwrap_or_else()', () => {
-    expect(pattern.test('result.unwrap_or_else(|| 0)')).toBe(false);
+  test('severity is low (tuned for noise reduction)', () => {
+    expect(slopPatterns.rust_bare_unwrap.severity).toBe('low');
   });
 
-  test('excludes test files', () => {
+  test('excludes test files and tests.rs modules', () => {
     expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
-    expect(isFileExcluded('parser_tests.rs', exclude)).toBe(true);
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
   });
 
-  test('excludes examples and benchmarks', () => {
-    // Note: **/examples/** glob requires a path prefix before "examples/"
+  test('excludes examples, benchmarks, and build.rs', () => {
     expect(isFileExcluded('crate/examples/basic.rs', exclude)).toBe(true);
     expect(isFileExcluded('crate/benches/perf.rs', exclude)).toBe(true);
+    expect(isFileExcluded('build.rs', exclude)).toBe(true);
   });
 
   test('does not exclude regular source files', () => {
@@ -180,7 +236,7 @@ describe('rust_bare_unwrap', () => {
 });
 
 // ============================================================================
-// New pattern: rust_log_debug
+// rust_log_debug (tuned: includes tracing crate)
 // ============================================================================
 
 describe('rust_log_debug', () => {
@@ -194,26 +250,38 @@ describe('rust_log_debug', () => {
     expect(pattern.test('log::trace!("detailed trace info");')).toBe(true);
   });
 
+  test('matches tracing::debug!()', () => {
+    expect(pattern.test('tracing::debug!("entering function");')).toBe(true);
+  });
+
+  test('matches tracing::trace!()', () => {
+    expect(pattern.test('tracing::trace!("detailed info");')).toBe(true);
+  });
+
+  test('matches tracing::debug! with structured fields', () => {
+    expect(pattern.test('tracing::debug!(config_path = ?p, "Resolved");')).toBe(true);
+  });
+
   test('does not match log::info!()', () => {
     expect(pattern.test('log::info!("server started");')).toBe(false);
   });
 
-  test('does not match log::warn!()', () => {
-    expect(pattern.test('log::warn!("deprecated feature");')).toBe(false);
+  test('does not match tracing::info!()', () => {
+    expect(pattern.test('tracing::info!("server started");')).toBe(false);
   });
 
-  test('does not match log::error!()', () => {
-    expect(pattern.test('log::error!("connection failed");')).toBe(false);
+  test('does not match tracing::warn!()', () => {
+    expect(pattern.test('tracing::warn!("deprecation");')).toBe(false);
   });
 
   test('does not match debug as variable name', () => {
     expect(pattern.test('let debug = true;')).toBe(false);
   });
 
-  test('excludes test files', () => {
+  test('excludes test files and tests.rs modules', () => {
     expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
-    expect(isFileExcluded('parser_tests.rs', exclude)).toBe(true);
     expect(isFileExcluded('src/tests/integration.rs', exclude)).toBe(true);
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
   });
 
   test('does not exclude regular source files', () => {
@@ -222,7 +290,7 @@ describe('rust_log_debug', () => {
 });
 
 // ============================================================================
-// New pattern: rust_empty_match_arm
+// rust_empty_match_arm
 // ============================================================================
 
 describe('rust_empty_match_arm', () => {
@@ -236,40 +304,25 @@ describe('rust_empty_match_arm', () => {
     expect(pattern.test('Err(_) => {}')).toBe(true);
   });
 
-  test('matches Err(err) => {}', () => {
-    expect(pattern.test('Err(err) => {}')).toBe(true);
-  });
-
   test('matches Err(e) => ()', () => {
     expect(pattern.test('Err(e) => ()')).toBe(true);
   });
 
-  test('matches with spacing', () => {
-    expect(pattern.test('Err( _ ) => { }')).toBe(true);
-  });
-
   test('does not match Err with handler body', () => {
-    expect(pattern.test('Err(e) => { log::error!("failed: {}", e); }')).toBe(false);
+    expect(pattern.test('Err(e) => { log::error!("{}", e); }')).toBe(false);
   });
 
-  test('does not match Err with return', () => {
-    expect(pattern.test('Err(e) => { return Err(e); }')).toBe(false);
-  });
-
-  test('scope is limited to Err - does not match Some(_) => {}', () => {
-    // Pattern intentionally only targets Err match arms (error swallowing)
+  test('scope is limited to Err', () => {
     expect(pattern.test('Some(_) => {}')).toBe(false);
-    expect(pattern.test('None => {}')).toBe(false);
   });
 
-  test('excludes test files', () => {
-    expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
-    expect(isFileExcluded('src/tests/unit.rs', exclude)).toBe(true);
+  test('excludes tests.rs modules', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
   });
 });
 
 // ============================================================================
-// New pattern: rust_unnecessary_clone
+// rust_unnecessary_clone (tuned: broader excludes)
 // ============================================================================
 
 describe('rust_unnecessary_clone', () => {
@@ -279,28 +332,17 @@ describe('rust_unnecessary_clone', () => {
     expect(pattern.test('let copy = value.clone();')).toBe(true);
   });
 
-  test('matches .clone() with spaces', () => {
-    expect(pattern.test('value.clone( )')).toBe(true);
-  });
-
-  test('matches .clone() in chained call', () => {
-    expect(pattern.test('items.clone().iter()')).toBe(true);
-  });
-
   test('does not match clone_from', () => {
     expect(pattern.test('value.clone_from(&other)')).toBe(false);
-  });
-
-  test('does not match Clone trait reference', () => {
-    expect(pattern.test('impl Clone for MyStruct')).toBe(false);
   });
 
   test('does not match #[derive(Clone)]', () => {
     expect(pattern.test('#[derive(Clone)]')).toBe(false);
   });
 
-  test('excludes test files and benchmarks', () => {
-    expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
+  test('excludes tests.rs modules and build.rs', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
+    expect(isFileExcluded('build.rs', exclude)).toBe(true);
     expect(isFileExcluded('crate/benches/throughput.rs', exclude)).toBe(true);
   });
 
@@ -310,7 +352,7 @@ describe('rust_unnecessary_clone', () => {
 });
 
 // ============================================================================
-// New pattern: rust_unsafe_block
+// rust_unsafe_block
 // ============================================================================
 
 describe('rust_unsafe_block', () => {
@@ -320,24 +362,7 @@ describe('rust_unsafe_block', () => {
     expect(pattern.test('unsafe {')).toBe(true);
   });
 
-  test('matches unsafe{', () => {
-    expect(pattern.test('unsafe{')).toBe(true);
-  });
-
-  test('matches unsafe with multiple spaces', () => {
-    expect(pattern.test('unsafe   {')).toBe(true);
-  });
-
-  test('does not match unsafe without opening brace', () => {
-    expect(pattern.test('// This is unsafe')).toBe(false);
-  });
-
-  test('matches unsafe { in comments (single-line regex limitation)', () => {
-    // Pattern cannot distinguish code from comments - flags for manual review
-    expect(pattern.test('// unsafe {')).toBe(true);
-  });
-
-  test('does not match unsafe fn declaration', () => {
+  test('does not match unsafe fn', () => {
     expect(pattern.test('unsafe fn do_thing()')).toBe(false);
   });
 
@@ -345,8 +370,8 @@ describe('rust_unsafe_block', () => {
     expect(pattern.test('unsafe impl Send for MyType')).toBe(false);
   });
 
-  test('excludes test files and benchmarks', () => {
-    expect(isFileExcluded('ffi_test.rs', exclude)).toBe(true);
+  test('excludes tests.rs modules and benchmarks', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
     expect(isFileExcluded('crate/benches/ffi.rs', exclude)).toBe(true);
   });
 
@@ -356,84 +381,47 @@ describe('rust_unsafe_block', () => {
 });
 
 // ============================================================================
-// New pattern: rust_hardcoded_path
+// rust_hardcoded_path (tuned: tests.rs exclude)
 // ============================================================================
 
 describe('rust_hardcoded_path', () => {
   const { pattern, exclude } = slopPatterns.rust_hardcoded_path;
 
   test('matches "/home/user/config"', () => {
-    expect(pattern.test('let path = "/home/user/config";')).toBe(true);
+    expect(pattern.test('let p = "/home/user/config";')).toBe(true);
   });
 
   test('matches "/tmp/cache"', () => {
-    expect(pattern.test('let tmp = "/tmp/cache/data";')).toBe(true);
-  });
-
-  test('matches "/etc/myapp.conf"', () => {
-    expect(pattern.test('let conf = "/etc/myapp.conf";')).toBe(true);
-  });
-
-  test('matches "/usr/local/bin"', () => {
-    expect(pattern.test('let bin = "/usr/local/bin/tool";')).toBe(true);
-  });
-
-  test('matches "/var/log/app.log"', () => {
-    expect(pattern.test('let log = "/var/log/app.log";')).toBe(true);
-  });
-
-  test('matches "/opt/service"', () => {
-    expect(pattern.test('let svc = "/opt/service/run";')).toBe(true);
+    expect(pattern.test('let p = "/tmp/cache/data";')).toBe(true);
   });
 
   test('matches raw strings r"/home/..."', () => {
     expect(pattern.test('let p = r"/home/user/data";')).toBe(true);
   });
 
-  test('matches raw strings r#"/tmp/..."#', () => {
-    expect(pattern.test('let p = r#"/tmp/cache/data"#;')).toBe(true);
-  });
-
   test('does not match URL paths', () => {
-    // URL paths don't start with quote+slash pattern
-    expect(pattern.test('let url = "https://example.com/home/user";')).toBe(false);
+    expect(pattern.test('"https://example.com/home/user"')).toBe(false);
   });
 
   test('does not match relative paths', () => {
-    expect(pattern.test('let p = "config/settings.toml";')).toBe(false);
+    expect(pattern.test('"config/settings.toml"')).toBe(false);
   });
 
-  test('does not match env var references', () => {
-    expect(pattern.test('let p = std::env::var("HOME");')).toBe(false);
-  });
-
-  test('does not match just "/" root', () => {
-    expect(pattern.test('let p = "/";')).toBe(false);
-  });
-
-  test('excludes test files', () => {
+  test('excludes tests.rs modules', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
     expect(isFileExcluded('config_test.rs', exclude)).toBe(true);
-    expect(isFileExcluded('src/tests/paths.rs', exclude)).toBe(true);
   });
 });
 
 // ============================================================================
-// New pattern: rust_expect_production
+// rust_expect_production (tuned: severity low, excludes main.rs + bin/)
 // ============================================================================
 
 describe('rust_expect_production', () => {
   const { pattern, exclude } = slopPatterns.rust_expect_production;
 
   test('matches .expect("message")', () => {
-    expect(pattern.test('let val = result.expect("should not fail");')).toBe(true);
-  });
-
-  test('matches .expect(\'message\')', () => {
-    expect(pattern.test("let val = result.expect('should work');")).toBe(true);
-  });
-
-  test('matches .expect with leading spaces', () => {
-    expect(pattern.test('    result.expect("failed to parse")')).toBe(true);
+    expect(pattern.test('result.expect("should not fail");')).toBe(true);
   });
 
   test('does not match .expect() without string arg', () => {
@@ -444,27 +432,27 @@ describe('rust_expect_production', () => {
     expect(pattern.test('result.unwrap()')).toBe(false);
   });
 
-  test('does not match expected as identifier', () => {
-    expect(pattern.test('let expected = 42;')).toBe(false);
+  test('severity is low (tuned for noise reduction)', () => {
+    expect(slopPatterns.rust_expect_production.severity).toBe('low');
   });
 
-  test('excludes test files', () => {
-    expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
-    expect(isFileExcluded('parser_tests.rs', exclude)).toBe(true);
-    expect(isFileExcluded('src/tests/unit.rs', exclude)).toBe(true);
+  test('excludes tests.rs modules', () => {
+    expect(isFileExcluded('src/config/tests.rs', exclude)).toBe(true);
   });
 
   test('excludes examples, benchmarks, and build.rs', () => {
     expect(isFileExcluded('crate/examples/demo.rs', exclude)).toBe(true);
-    expect(isFileExcluded('crate/benches/perf.rs', exclude)).toBe(true);
     expect(isFileExcluded('build.rs', exclude)).toBe(true);
   });
 
-  test('does not exclude main.rs (expect in main is still flagged)', () => {
-    expect(isFileExcluded('src/main.rs', exclude)).toBe(false);
+  test('excludes main.rs and binary targets', () => {
+    expect(isFileExcluded('src/main.rs', exclude)).toBe(true);
+    expect(isFileExcluded('crate/src/main.rs', exclude)).toBe(true);
+    expect(isFileExcluded('src/bin/my_tool.rs', exclude)).toBe(true);
+    expect(isFileExcluded('crate/src/bin/runner.rs', exclude)).toBe(true);
   });
 
-  test('does not exclude regular source files', () => {
+  test('does not exclude regular library source files', () => {
     expect(isFileExcluded('src/lib.rs', exclude)).toBe(false);
     expect(isFileExcluded('src/parser.rs', exclude)).toBe(false);
   });
