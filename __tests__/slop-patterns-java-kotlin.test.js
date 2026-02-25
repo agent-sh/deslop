@@ -11,6 +11,21 @@ const {
   hasLanguage
 } = require('../lib/patterns/slop-patterns');
 
+const {
+  detectLanguage,
+  detectCommentLanguage,
+  SOURCE_EXTENSIONS,
+  COMMENT_SYNTAX,
+  isTestFile,
+  ENTRY_POINTS,
+  EXPORT_PATTERNS
+} = require('../lib/patterns/slop-analyzers');
+
+const {
+  detectProjectLanguages,
+  SUPPORTED_LANGUAGES
+} = require('../lib/patterns/cli-enhancers');
+
 // ============================================================================
 // Integration tests - Java
 // ============================================================================
@@ -100,6 +115,115 @@ describe('Kotlin language integration', () => {
       expect(typeof p.description).toBe('string');
       expect(Array.isArray(p.exclude)).toBe(true);
     }
+  });
+});
+
+// ============================================================================
+// Infrastructure integration tests - detectLanguage, SOURCE_EXTENSIONS, etc.
+// ============================================================================
+
+describe('detectLanguage integration', () => {
+  test('returns "java" for .java files', () => {
+    expect(detectLanguage('Foo.java')).toBe('java');
+  });
+
+  test('returns "java" for path with .java extension', () => {
+    expect(detectLanguage('src/main/java/com/example/Service.java')).toBe('java');
+  });
+
+  test('returns "kotlin" for .kt files', () => {
+    expect(detectLanguage('Bar.kt')).toBe('kotlin');
+  });
+
+  test('returns "kotlin" for .kts files', () => {
+    expect(detectLanguage('build.gradle.kts')).toBe('kotlin');
+  });
+
+  test('returns "kotlin" for path with .kt extension', () => {
+    expect(detectLanguage('src/main/kotlin/com/example/Service.kt')).toBe('kotlin');
+  });
+});
+
+describe('detectCommentLanguage integration', () => {
+  test('returns "java" for .java extension', () => {
+    expect(detectCommentLanguage('.java')).toBe('java');
+  });
+
+  test('returns "kotlin" for .kt extension', () => {
+    expect(detectCommentLanguage('.kt')).toBe('kotlin');
+  });
+
+  test('returns "kotlin" for .kts extension', () => {
+    expect(detectCommentLanguage('.kts')).toBe('kotlin');
+  });
+});
+
+describe('SOURCE_EXTENSIONS integration', () => {
+  test('includes kotlin with .kt and .kts', () => {
+    expect(SOURCE_EXTENSIONS.kotlin).toEqual(['.kt', '.kts']);
+  });
+
+  test('includes java with .java', () => {
+    expect(SOURCE_EXTENSIONS.java).toEqual(['.java']);
+  });
+});
+
+describe('COMMENT_SYNTAX integration', () => {
+  test('includes java with // and /* */ syntax', () => {
+    expect(COMMENT_SYNTAX.java).toBeDefined();
+    expect(COMMENT_SYNTAX.java.line).toBeDefined();
+    expect(COMMENT_SYNTAX.java.block).toBeDefined();
+  });
+
+  test('includes kotlin with // and /* */ syntax', () => {
+    expect(COMMENT_SYNTAX.kotlin).toBeDefined();
+    expect(COMMENT_SYNTAX.kotlin.line).toBeDefined();
+    expect(COMMENT_SYNTAX.kotlin.block).toBeDefined();
+  });
+});
+
+describe('isTestFile integration', () => {
+  test('recognizes Java test files', () => {
+    expect(isTestFile('FooTest.java')).toBe(true);
+    expect(isTestFile('src/test/java/FooTest.java')).toBe(true);
+  });
+
+  test('recognizes Kotlin test files', () => {
+    expect(isTestFile('BarTest.kt')).toBe(true);
+    expect(isTestFile('src/test/kotlin/BarTest.kt')).toBe(true);
+  });
+
+  test('does not flag regular Java/Kotlin source files', () => {
+    expect(isTestFile('src/main/java/Service.java')).toBe(false);
+    expect(isTestFile('src/main/kotlin/Service.kt')).toBe(false);
+  });
+});
+
+describe('ENTRY_POINTS integration', () => {
+  test('includes Kotlin entry points', () => {
+    expect(ENTRY_POINTS).toContain('Main.kt');
+    expect(ENTRY_POINTS).toContain('Application.kt');
+    expect(ENTRY_POINTS).toContain('App.kt');
+  });
+
+  test('includes Java entry points', () => {
+    expect(ENTRY_POINTS).toContain('Main.java');
+    expect(ENTRY_POINTS).toContain('Application.java');
+    expect(ENTRY_POINTS).toContain('App.java');
+  });
+});
+
+describe('EXPORT_PATTERNS integration', () => {
+  test('includes kotlin export patterns', () => {
+    expect(EXPORT_PATTERNS.kotlin).toBeDefined();
+    expect(Array.isArray(EXPORT_PATTERNS.kotlin)).toBe(true);
+  });
+});
+
+describe('cli-enhancers integration', () => {
+  test('SUPPORTED_LANGUAGES includes java and kotlin', () => {
+    expect(SUPPORTED_LANGUAGES).toContain('java');
+    expect(SUPPORTED_LANGUAGES).toContain('kotlin');
   });
 });
 
@@ -482,9 +606,24 @@ describe('java_raw_type', () => {
     expect(pattern.test('Map<String, Integer> data = new HashMap<>();')).toBe(false);
   });
 
+  test('matches raw types with access modifiers (still raw)', () => {
+    // private/static/final List is still a raw type
+    expect(pattern.test('private List items;')).toBe(true);
+    expect(pattern.test('static List cache;')).toBe(true);
+    expect(pattern.test('final List constants;')).toBe(true);
+  });
+
   test('does not match "List" in a comment', () => {
     // Variable name after List is required
     expect(pattern.test('// This is a List of items')).toBe(false);
+  });
+
+  test('does not match List.of() static method call', () => {
+    expect(pattern.test('List.of(1, 2, 3)')).toBe(false);
+  });
+
+  test('does not match List<String> (generic type)', () => {
+    expect(pattern.test('List<String> items = new ArrayList<>();')).toBe(false);
   });
 
   test('excludes test files', () => {
@@ -563,9 +702,14 @@ describe('kotlin_println_debugging', () => {
     expect(pattern.test('fprintln("test")')).toBe(false);
   });
 
-  test('does not match method named println on object', () => {
-    // logger.println - the lookbehind (?<!\w) should prevent this
+  test('does not match println preceded by word character (part of identifier)', () => {
+    // The lookbehind (?<!\w) prevents matching when println is part of an identifier
     expect(pattern.test('loggerprintln("test")')).toBe(false);
+  });
+
+  test('matches object.println() since dot-println is typically debug output', () => {
+    // logger.println() is still flagged - dot is not a \w char, and .println() is debug output
+    expect(pattern.test('logger.println("test")')).toBe(true);
   });
 
   test('excludes test files', () => {
@@ -731,6 +875,17 @@ describe('kotlin_swallowed_error', () => {
 
   test('does not match runCatching{}.getOrThrow()', () => {
     expect(pattern.test('runCatching { parse(x) }.getOrThrow()')).toBe(false);
+  });
+
+  test('matches with extra whitespace around dot and method', () => {
+    expect(pattern.test('runCatching { doWork() } .  getOrNull()')).toBe(true);
+  });
+
+  test('does not match when block contains nested braces (known limitation)', () => {
+    // Pattern uses [^}]* which stops at first }. Blocks with nested braces
+    // (e.g., if/when statements) won't match. This is acceptable since
+    // line-by-line scanning handles most cases and empty_catch covers the rest.
+    expect(pattern.test('runCatching { if (x) { foo() } }.getOrNull()')).toBe(false);
   });
 
   test('excludes test files', () => {
