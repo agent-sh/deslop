@@ -256,6 +256,12 @@ describe('rust_empty_match_arm', () => {
     expect(pattern.test('Err(e) => { return Err(e); }')).toBe(false);
   });
 
+  test('scope is limited to Err - does not match Some(_) => {}', () => {
+    // Pattern intentionally only targets Err match arms (error swallowing)
+    expect(pattern.test('Some(_) => {}')).toBe(false);
+    expect(pattern.test('None => {}')).toBe(false);
+  });
+
   test('excludes test files', () => {
     expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
     expect(isFileExcluded('src/tests/unit.rs', exclude)).toBe(true);
@@ -289,6 +295,10 @@ describe('rust_unnecessary_clone', () => {
     expect(pattern.test('impl Clone for MyStruct')).toBe(false);
   });
 
+  test('does not match #[derive(Clone)]', () => {
+    expect(pattern.test('#[derive(Clone)]')).toBe(false);
+  });
+
   test('excludes test files and benchmarks', () => {
     expect(isFileExcluded('parser_test.rs', exclude)).toBe(true);
     expect(isFileExcluded('crate/benches/throughput.rs', exclude)).toBe(true);
@@ -318,9 +328,13 @@ describe('rust_unsafe_block', () => {
     expect(pattern.test('unsafe   {')).toBe(true);
   });
 
-  test('does not match unsafe in comments', () => {
-    // The pattern looks for unsafe followed by {, not in comment context
+  test('does not match unsafe without opening brace', () => {
     expect(pattern.test('// This is unsafe')).toBe(false);
+  });
+
+  test('matches unsafe { in comments (single-line regex limitation)', () => {
+    // Pattern cannot distinguish code from comments - flags for manual review
+    expect(pattern.test('// unsafe {')).toBe(true);
   });
 
   test('does not match unsafe fn declaration', () => {
@@ -370,6 +384,19 @@ describe('rust_hardcoded_path', () => {
 
   test('matches "/opt/service"', () => {
     expect(pattern.test('let svc = "/opt/service/run";')).toBe(true);
+  });
+
+  test('matches raw strings r"/home/..."', () => {
+    expect(pattern.test('let p = r"/home/user/data";')).toBe(true);
+  });
+
+  test('matches raw strings r#"/tmp/..."#', () => {
+    expect(pattern.test('let p = r#"/tmp/cache/data"#;')).toBe(true);
+  });
+
+  test('does not match URL paths', () => {
+    // URL paths don't start with quote+slash pattern
+    expect(pattern.test('let url = "https://example.com/home/user";')).toBe(false);
   });
 
   test('does not match relative paths', () => {
@@ -431,6 +458,10 @@ describe('rust_expect_production', () => {
     expect(isFileExcluded('crate/examples/demo.rs', exclude)).toBe(true);
     expect(isFileExcluded('crate/benches/perf.rs', exclude)).toBe(true);
     expect(isFileExcluded('build.rs', exclude)).toBe(true);
+  });
+
+  test('does not exclude main.rs (expect in main is still flagged)', () => {
+    expect(isFileExcluded('src/main.rs', exclude)).toBe(false);
   });
 
   test('does not exclude regular source files', () => {
