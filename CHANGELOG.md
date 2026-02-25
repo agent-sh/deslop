@@ -3,6 +3,27 @@
 ## [Unreleased]
 
 ### Added
+- Java language support with 10 slop detection patterns:
+  - `placeholder_unsupported_java` - throw new UnsupportedOperationException()
+  - `java_sysout_debugging` - System.out/err.println() debug output
+  - `java_stacktrace_debugging` - printStackTrace() calls
+  - `java_throw_todo` - RuntimeException("TODO") / IllegalStateException("not implemented")
+  - `java_return_null_todo` - return null; // TODO placeholder
+  - `java_empty_catch` - empty catch blocks
+  - `java_catch_ignore` - catch block with // ignore comment
+  - `java_suppress_warnings` - @SuppressWarnings annotations
+  - `java_raw_type` - raw generics without type parameters
+  - `java_wildcard_catch` - overly broad catch (Exception/Throwable)
+- Kotlin language support with 6 slop detection patterns:
+  - `kotlin_println_debugging` - println() debug output
+  - `kotlin_todo_call` - TODO() stdlib call that throws at runtime
+  - `kotlin_fixme_comment` - // FIXME comment with placeholder code
+  - `kotlin_empty_catch` - empty catch blocks
+  - `kotlin_swallowed_error` - runCatching{}.getOrNull() silently swallows errors
+  - `kotlin_suppress_annotation` - @Suppress annotations
+- Support for Kotlin file extensions (.kt, .kts)
+- build.gradle, build.gradle.kts, pom.xml as Java/Kotlin project indicators
+- 510 tests for Java and Kotlin patterns
 - C/C++ language support with 10 slop detection patterns:
   - C (7 patterns): `c_printf_debugging`, `c_ifdef_debug_block`, `c_placeholder_todo`, `c_pragma_warning_disable`, `c_goto_usage`, `c_hardcoded_credential_path`, `c_magic_number_cast`
   - C++ (3 patterns): `cpp_cout_debugging`, `cpp_throw_not_implemented`, `cpp_empty_catch`
