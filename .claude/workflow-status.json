@@ -1,0 +1,37 @@
+{
+  "task": {
+    "id": "9",
+    "source": "internal",
+    "title": "Add Shell/Bash script support"
+  },
+  "workflow": {
+    "id": "implementation",
+    "status": "complete",
+    "currentPhase": "implementation-complete"
+  },
+  "git": {
+    "mainRepoPath": "/c/Users/avife/agent-sh/deslop",
+    "worktreePath": "/c/Users/avife/agent-sh/worktrees/add-shell-bash-support-9",
+    "branch": "feature/add-shell-bash-support-9",
+    "baseSha": "300e85b",
+    "currentSha": "55c40a3",
+    "isWorktree": true,
+    "originalBranch": "fix/tune-rust-patterns"
+  },
+  "implementation": {
+    "implementationComplete": true,
+    "stepsCompleted": 6,
+    "totalSteps": 6,
+    "filesModified": 4,
+    "filesCreated": 1,
+    "testsAdded": 72,
+    "commitsCreated": 2,
+    "verificationPassed": true
+  },
+  "resume": {
+    "canResume": true,
+    "resumeFromStep": "review"
+  },
+  "lastActivityAt": "2026-02-25T18:30:00Z",
+  "createdAt": "2026-02-25T00:00:00Z"
+}
