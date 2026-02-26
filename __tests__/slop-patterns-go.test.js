@@ -109,6 +109,11 @@ describe('go_fmt_debugging', () => {
     expect(pattern.test('fmt.Print("hello")')).toBe(true);
   });
 
+  test('does not match commented-out fmt.Println', () => {
+    expect(pattern.test('// fmt.Println("debug")')).toBe(false);
+    expect(pattern.test('  // fmt.Printf("value: %v", x)')).toBe(false);
+  });
+
   test('does not match fmt.Sprintf()', () => {
     expect(pattern.test('s := fmt.Sprintf("value: %d", x)')).toBe(false);
   });
@@ -170,6 +175,11 @@ describe('go_log_debugging', () => {
     expect(pattern.test('log.Panicf("critical: %v", err)')).toBe(true);
   });
 
+  test('does not match commented-out log calls', () => {
+    expect(pattern.test('// log.Println("debug")')).toBe(false);
+    expect(pattern.test('  // log.Fatal(err)')).toBe(false);
+  });
+
   test('does not match slog.Info()', () => {
     expect(pattern.test('slog.Info("starting server")')).toBe(false);
   });
@@ -223,8 +233,9 @@ describe('go_spew_debugging', () => {
     expect(pattern.test('pp.Print(data)')).toBe(true);
   });
 
-  test('does not match spew in comments', () => {
-    expect(pattern.test('// use spew for debugging')).toBe(false);
+  test('does not match commented-out spew calls', () => {
+    expect(pattern.test('// spew.Dump(config)')).toBe(false);
+    expect(pattern.test('  // pp.Println(result)')).toBe(false);
   });
 
   test('excludes test files', () => {
@@ -295,13 +306,29 @@ describe('go_discarded_error', () => {
     expect(pattern.test('_ = file.Close()')).toBe(true);
   });
 
+  test('matches indented _ = file.Close()', () => {
+    expect(pattern.test('\t_ = file.Close()')).toBe(true);
+    expect(pattern.test('  _ = conn.Close()')).toBe(true);
+  });
+
+  test('does not match multi-return value, _ = func()', () => {
+    // Multi-return where _ discards a bool or non-error value
+    expect(pattern.test('value, _ = c.GetQuery(key)')).toBe(false);
+    expect(pattern.test('head, tail, _ = strings.Cut(str, sep)')).toBe(false);
+    expect(pattern.test('resp, _ = UnwrapResponse(rw)')).toBe(false);
+  });
+
+  test('does not match double-discard _, _ = func()', () => {
+    // Both returns discarded deliberately
+    expect(pattern.test('_, _ = fmt.Fprintf(w, "response")')).toBe(false);
+    expect(pattern.test('_, _ = io.Copy(io.Discard, r.Body)')).toBe(false);
+  });
+
   test('does not match for _, v := range', () => {
-    // This is a critical false positive guard - range iteration is not error discarding
     expect(pattern.test('for _, v := range items {')).toBe(false);
   });
 
   test('does not match _, ok := m[key]', () => {
-    // Map existence check - the _ discards value, not an error
     expect(pattern.test('_, ok := m[key]')).toBe(false);
   });
 
@@ -327,6 +354,12 @@ describe('go_bare_os_exit', () => {
 
   test('matches os.Exit(0)', () => {
     expect(pattern.test('os.Exit(0)')).toBe(true);
+  });
+
+  test('does not match os.Exit in comments', () => {
+    expect(pattern.test('// os.Exit(1).')).toBe(false);
+    expect(pattern.test('// The logger then calls os.Exit(1).')).toBe(false);
+    expect(pattern.test('  // FatalLevel logs a message, then calls os.Exit(1).')).toBe(false);
   });
 
   test('does not match os.Exitcode', () => {
