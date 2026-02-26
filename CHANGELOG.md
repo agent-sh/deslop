@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- Go language support with 9 slop detection patterns:
+- Go language support with 15 slop detection patterns:
   - `placeholder_panic_go` - panic("TODO: ...") placeholder
   - `go_fmt_debugging` - fmt.Print/Println/Printf debug statements
   - `go_log_debugging` - log.Print/Println/Printf debug logging
@@ -13,6 +13,12 @@
   - `go_bare_os_exit` - os.Exit without defer cleanup
   - `go_empty_interface_param` - interface{} parameters
   - `go_todo_empty_func` - empty function bodies with TODO comments
+  - `go_unchecked_type_assertion` - type assertion without comma-ok (panics)
+  - `go_panic_recoverable` - panic for recoverable errors
+  - `go_error_string_capitalized` - capitalized error strings (Go convention)
+  - `go_defer_close_no_error` - defer Close() without error handling
+  - `go_weak_random` - math/rand instead of crypto/rand
+  - `go_unused_append` - append() result not assigned (always a bug)
 - golangci-lint integration in Phase 2 pipeline
 - Java language support with 10 slop detection patterns:
   - `placeholder_unsupported_java` - throw new UnsupportedOperationException()

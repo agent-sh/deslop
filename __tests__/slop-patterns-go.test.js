@@ -1,6 +1,6 @@
 /**
  * Tests for Go slop detection patterns
- * Covers all 9 Go-specific patterns (1 existing + 8 new)
+ * Covers all 15 Go-specific patterns
  */
 
 const {
@@ -20,12 +20,12 @@ describe('Go language integration', () => {
     expect(hasLanguage('go')).toBe(true);
   });
 
-  test('getPatternsForLanguageOnly("go") returns exactly 9 patterns', () => {
+  test('getPatternsForLanguageOnly("go") returns exactly 15 patterns', () => {
     const goOnly = getPatternsForLanguageOnly('go');
-    expect(Object.keys(goOnly)).toHaveLength(9);
+    expect(Object.keys(goOnly)).toHaveLength(15);
   });
 
-  test('all 9 Go pattern names are present', () => {
+  test('all 15 Go pattern names are present', () => {
     const names = Object.keys(getPatternsForLanguageOnly('go'));
     expect(names).toContain('placeholder_panic_go');
     expect(names).toContain('go_fmt_debugging');
@@ -36,6 +36,12 @@ describe('Go language integration', () => {
     expect(names).toContain('go_bare_os_exit');
     expect(names).toContain('go_empty_interface_param');
     expect(names).toContain('go_todo_empty_func');
+    expect(names).toContain('go_unchecked_type_assertion');
+    expect(names).toContain('go_panic_recoverable');
+    expect(names).toContain('go_error_string_capitalized');
+    expect(names).toContain('go_defer_close_no_error');
+    expect(names).toContain('go_weak_random');
+    expect(names).toContain('go_unused_append');
   });
 
   test('getPatternsForLanguage("go") includes universal patterns', () => {
@@ -472,5 +478,228 @@ describe('go_todo_empty_func', () => {
 
   test('does not exclude regular source files', () => {
     expect(isFileExcluded('internal/handler.go', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// go_unchecked_type_assertion
+// ============================================================================
+
+describe('go_unchecked_type_assertion', () => {
+  const { pattern, exclude } = slopPatterns.go_unchecked_type_assertion;
+
+  test('matches single-value type assertion with :=', () => {
+    expect(pattern.test('c := engine.pool.Get().(*Context)')).toBe(true);
+  });
+
+  test('matches type assertion on interface', () => {
+    expect(pattern.test('he := err.(HTTPStatusCoder)')).toBe(true);
+  });
+
+  test('matches pointer type assertion', () => {
+    expect(pattern.test('w := rw.(*ResponseWriter)')).toBe(true);
+  });
+
+  test('does not match comma-ok type assertion', () => {
+    expect(pattern.test('he, ok := err.(HTTPStatusCoder)')).toBe(false);
+    expect(pattern.test('c, ok = pool.Get().(*Context)')).toBe(false);
+  });
+
+  test('does not match commented type assertion', () => {
+    expect(pattern.test('// c := pool.Get().(*Context)')).toBe(false);
+  });
+
+  test('does not match type switch', () => {
+    // .(type) uses lowercase - our regex only matches .(Uppercase...)
+    expect(pattern.test('switch v := x.(type) {')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('handler.go', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// go_panic_recoverable
+// ============================================================================
+
+describe('go_panic_recoverable', () => {
+  const { pattern, exclude } = slopPatterns.go_panic_recoverable;
+
+  test('matches panic with fmt.Sprintf', () => {
+    expect(pattern.test('panic(fmt.Sprintf("invalid mode: %s", mode))')).toBe(true);
+  });
+
+  test('matches panic with errors.New', () => {
+    expect(pattern.test('panic(errors.New("cannot process"))')).toBe(true);
+  });
+
+  test('matches panic with "invalid" message', () => {
+    expect(pattern.test('panic("invalid escape string in path")')).toBe(true);
+  });
+
+  test('matches panic with "unknown" message', () => {
+    expect(pattern.test('panic("unknown type: " + t.String())')).toBe(true);
+  });
+
+  test('matches panic with "cannot" message', () => {
+    expect(pattern.test('panic("cannot read nil body")')).toBe(true);
+  });
+
+  test('matches panic with "missing" message', () => {
+    expect(pattern.test('panic("missing required field")')).toBe(true);
+  });
+
+  test('does not match panic with TODO (caught by placeholder_panic_go)', () => {
+    expect(pattern.test('panic("TODO: implement this")')).toBe(false);
+  });
+
+  test('does not match panic in comments', () => {
+    expect(pattern.test('// panic("invalid state")')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+});
+
+// ============================================================================
+// go_error_string_capitalized
+// ============================================================================
+
+describe('go_error_string_capitalized', () => {
+  const { pattern, exclude } = slopPatterns.go_error_string_capitalized;
+
+  test('matches errors.New with capitalized string', () => {
+    expect(pattern.test('return errors.New("Invalid request")')).toBe(true);
+  });
+
+  test('matches fmt.Errorf with capitalized string', () => {
+    expect(pattern.test('return fmt.Errorf("Failed to connect: %w", err)')).toBe(true);
+  });
+
+  test('does not match lowercase error string', () => {
+    expect(pattern.test('return errors.New("invalid request")')).toBe(false);
+  });
+
+  test('does not match lowercase fmt.Errorf', () => {
+    expect(pattern.test('return fmt.Errorf("failed to connect: %w", err)')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('handler.go', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// go_defer_close_no_error
+// ============================================================================
+
+describe('go_defer_close_no_error', () => {
+  const { pattern, exclude } = slopPatterns.go_defer_close_no_error;
+
+  test('matches defer f.Close()', () => {
+    expect(pattern.test('defer f.Close()')).toBe(true);
+  });
+
+  test('matches defer conn.Close()', () => {
+    expect(pattern.test('\tdefer conn.Close()')).toBe(true);
+  });
+
+  test('matches defer resp.Body.Close()', () => {
+    expect(pattern.test('defer resp.Body.Close()')).toBe(true);
+  });
+
+  test('does not match commented defer Close', () => {
+    expect(pattern.test('// defer f.Close()')).toBe(false);
+  });
+
+  test('does not match defer with error handling', () => {
+    // defer func() { _ = f.Close() }() - different pattern
+    expect(pattern.test('defer func() { _ = f.Close() }()')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('server.go', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// go_weak_random
+// ============================================================================
+
+describe('go_weak_random', () => {
+  const { pattern, exclude } = slopPatterns.go_weak_random;
+
+  test('matches rand.New(rand.NewSource(...))', () => {
+    expect(pattern.test('r := rand.New(rand.NewSource(time.Now().UnixNano()))')).toBe(true);
+  });
+
+  test('matches rand.New(rand.NewSource(int64(...)))', () => {
+    expect(pattern.test('b.random = rand.New(rand.NewSource(int64(time.Now().Nanosecond())))')).toBe(true);
+  });
+
+  test('does not match commented out weak random', () => {
+    expect(pattern.test('// rand.New(rand.NewSource(seed))')).toBe(false);
+  });
+
+  test('does not match crypto/rand usage', () => {
+    expect(pattern.test('n, err := rand.Read(b)')).toBe(false);
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('server.go', exclude)).toBe(false);
+  });
+});
+
+// ============================================================================
+// go_unused_append
+// ============================================================================
+
+describe('go_unused_append', () => {
+  const { pattern, exclude } = slopPatterns.go_unused_append;
+
+  test('matches bare append() call', () => {
+    expect(pattern.test('  append(items, newItem)')).toBe(true);
+  });
+
+  test('matches unindented append()', () => {
+    expect(pattern.test('append(slice, elem)')).toBe(true);
+  });
+
+  test('does not match assigned append', () => {
+    expect(pattern.test('items = append(items, newItem)')).toBe(false);
+  });
+
+  test('does not match short-assign append', () => {
+    expect(pattern.test('items := append(items, newItem)')).toBe(false);
+  });
+
+  test('severity is critical (this is always a bug)', () => {
+    expect(slopPatterns.go_unused_append.severity).toBe('critical');
+  });
+
+  test('excludes test files', () => {
+    expect(isFileExcluded('handler_test.go', exclude)).toBe(true);
+  });
+
+  test('does not exclude regular source files', () => {
+    expect(isFileExcluded('handler.go', exclude)).toBe(false);
   });
 });
