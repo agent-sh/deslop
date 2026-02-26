@@ -176,6 +176,12 @@ C patterns (prefix `c_`) apply to both C and C++ files. C++ patterns (prefix `cp
 | go_bare_os_exit | os.Exit without defer cleanup | medium |
 | go_empty_interface_param | interface{} parameters - prefer specific types | low |
 | go_todo_empty_func | Empty function bodies with TODO comments | high |
+| go_unchecked_type_assertion | Type assertion without comma-ok - panics at runtime | high |
+| go_panic_recoverable | panic() for recoverable errors - return error instead | high |
+| go_error_string_capitalized | Capitalized error strings (Go convention: lowercase) | low |
+| go_defer_close_no_error | defer Close() without error handling | low |
+| go_weak_random | math/rand instead of crypto/rand for security | medium |
+| go_unused_append | append() result not assigned - always a bug | critical |
 
 ### Shell/Bash
 
