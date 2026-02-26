@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- Go language support with 9 slop detection patterns:
+  - `placeholder_panic_go` - panic("TODO: ...") placeholder
+  - `go_fmt_debugging` - fmt.Print/Println/Printf debug statements
+  - `go_log_debugging` - log.Print/Println/Printf debug logging
+  - `go_spew_debugging` - spew.Dump/Sdump debug output
+  - `go_empty_error_check` - empty if err != nil {} blocks
+  - `go_discarded_error` - _ = someFunc() discarding errors
+  - `go_bare_os_exit` - os.Exit without defer cleanup
+  - `go_empty_interface_param` - interface{} parameters
+  - `go_todo_empty_func` - empty function bodies with TODO comments
+- golangci-lint integration in Phase 2 pipeline
 - Java language support with 10 slop detection patterns:
   - `placeholder_unsupported_java` - throw new UnsupportedOperationException()
   - `java_sysout_debugging` - System.out/err.println() debug output

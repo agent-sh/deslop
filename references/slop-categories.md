@@ -163,6 +163,20 @@ C patterns (prefix `c_`) apply to both C and C++ files. C++ patterns (prefix `cp
 | kotlin_swallowed_error | runCatching{}.getOrNull() silently swallows errors | medium |
 | kotlin_suppress_annotation | @Suppress("UNCHECKED_CAST") | low |
 
+### Go
+
+| Pattern | Description | Severity |
+|---------|-------------|----------|
+| placeholder_panic_go | panic("TODO: ...") placeholder | high |
+| go_fmt_debugging | fmt.Print/Println/Printf debug statements | medium |
+| go_log_debugging | log.Print/Println/Printf debug logging | low |
+| go_spew_debugging | spew.Dump/Sdump debug output | medium |
+| go_empty_error_check | Empty if err != nil {} blocks | high |
+| go_discarded_error | _ = someFunc() discarding errors | medium |
+| go_bare_os_exit | os.Exit without defer cleanup | medium |
+| go_empty_interface_param | interface{} parameters - prefer specific types | low |
+| go_todo_empty_func | Empty function bodies with TODO comments | high |
+
 ### Shell/Bash
 
 | Pattern | Description | Severity |
