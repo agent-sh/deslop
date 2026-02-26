@@ -365,6 +365,10 @@ describe('go_empty_interface_param', () => {
     expect(pattern.test('func Handle(ctx context.Context, data interface{}')).toBe(true);
   });
 
+  test('matches func with variadic interface{} param', () => {
+    expect(pattern.test('func Log(args ...interface{}')).toBe(true);
+  });
+
   test('does not match func without interface{}', () => {
     expect(pattern.test('func Process(data string)')).toBe(false);
   });
@@ -405,12 +409,19 @@ describe('go_todo_empty_func', () => {
     expect(pattern.test('func Validate(s string) bool { // HACK')).toBe(true);
   });
 
+  test('matches func with named return values', () => {
+    expect(pattern.test('func Process() (result int, err error) { // TODO implement')).toBe(true);
+  });
+
+  test('matches func with multiple unnamed returns', () => {
+    expect(pattern.test('func Get() (int, error) { // TODO')).toBe(true);
+  });
+
   test('does not match func with real body', () => {
     expect(pattern.test('func Process(x int) error { return nil }')).toBe(false);
   });
 
   test('does not match func with TODO in body after code', () => {
-    // This has actual code before the TODO
     expect(pattern.test('func Process(x int) error { x++; // TODO add more')).toBe(false);
   });
 
