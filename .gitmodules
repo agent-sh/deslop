@@ -1,0 +1,3 @@
+[submodule "agent-knowledge"]
+	path = agent-knowledge
+	url = https://github.com/agent-sh/agent-knowledge.git
