@@ -1,0 +1,23 @@
+severity = "Warning"
+exclude = ["node_modules/**", ".git/**"]
+target = "ClaudeCode"
+tools = []
+locale = "en"
+
+[rules]
+
+disabled_rules = [
+    "PE-001",      # Auto-generated CLAUDE.md - rule placement controlled by agent-core template
+    "PE-005",      # "Be concise" is ecosystem-wide boilerplate from agent-core sync
+    "CC-MEM-005",  # Same as PE-005 for Claude-specific rules
+    "CC-MEM-006",  # Negative instructions (NEVER/Do not) are ecosystem standard critical rules
+    "CC-MEM-008",  # Duplicate of PE-001 for Claude memory files
+    "CC-SK-017",   # Intentional - version is a client-specific frontmatter field
+    "XP-003",      # Intentional - references/slop-categories.md uses example paths like /home/user/
+    "CC-MEM-004",  # npm validate referenced in auto-generated CLAUDE.md (agent-core template issue)
+    "XML-001",     # False positive - <path> is a placeholder in code examples, not unclosed XML
+]
+
+[tool_versions]
+
+[spec_revisions]
