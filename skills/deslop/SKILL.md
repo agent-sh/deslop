@@ -34,13 +34,79 @@ Arguments: `[report|apply] [--scope=<path>|all|diff] [--thoroughness=quick|norma
 
 ## Detection Pipeline
 
+### Phase 0: Repo-Intel Targeting (Optional)
+
+Check if repo-intel data exists. If available, use `recent-ai` to target AI-written files. If not available, ask the user whether to generate it.
+
+```javascript
+const fs = require('fs');
+const path = require('path');
+
+const cwd = process.cwd();
+const stateDir = ['.claude', '.opencode', '.codex']
+  .find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
+const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
+
+let aiTargetFiles = null;
+
+if (!fs.existsSync(mapFile)) {
+  // No repo-intel map - ask user if they want to generate one
+  const response = await AskUserQuestion({
+    questions: [{
+      question: 'Generate repo-intel?',
+      description: 'No repo-intel map found. Generating one lets deslop target AI-written files instead of scanning everything. Takes ~5 seconds.',
+      options: [
+        { label: 'Yes, generate it', value: 'yes' },
+        { label: 'Skip, scan all files', value: 'no' }
+      ]
+    }]
+  });
+
+  if (response === 'yes' || response?.['Generate repo-intel?'] === 'yes') {
+    try {
+      const { binary } = require('@agentsys/lib');
+      const output = binary.runAnalyzer(['repo-intel', 'init', cwd]);
+      // Save the map
+      const stateDirPath = path.join(cwd, stateDir);
+      if (!fs.existsSync(stateDirPath)) fs.mkdirSync(stateDirPath, { recursive: true });
+      fs.writeFileSync(mapFile, output);
+    } catch (e) {
+      // Binary not available - proceed without targeting
+    }
+  }
+}
+
+// If map exists (either pre-existing or just created), get AI targets
+if (fs.existsSync(mapFile)) {
+  try {
+    const { binary } = require('@agentsys/lib');
+    const json = binary.runAnalyzer([
+      'repo-intel', 'query', 'recent-ai', '--top', '50',
+      '--map-file', mapFile, cwd
+    ]);
+    const results = JSON.parse(json);
+    if (results.length > 0) {
+      aiTargetFiles = results.map(r => r.path);
+      // Log what we're targeting
+      console.log(`[INFO] Targeting ${aiTargetFiles.length} AI-written files from repo-intel`);
+    }
+  } catch (e) {
+    // Query failed - proceed with full scan
+  }
+}
+```
+
+If `aiTargetFiles` is set, pass them to the detection script as explicit file arguments. Otherwise, fall back to scanning everything.
+
 ### Phase 1: Run Detection Script
 
 The detection script is at `../../scripts/detect.js` relative to this skill.
 
 **Run detection** (use relative path from skill directory):
 ```bash
-# Scripts are at plugin root: ../../scripts/ from skills/deslop/
+# If aiTargetFiles is available from Phase 0, pass them explicitly:
+# node ../../scripts/detect.js file1.ts file2.ts --thoroughness normal --compact
+# Otherwise scan everything:
 node ../../scripts/detect.js . --thoroughness normal --compact --max 50
 ```
 
@@ -56,12 +122,31 @@ git diff --name-only origin/${BASE}..HEAD | \
 
 ### Phase 2: Repo-Map Enhancement (Optional)
 
-If repo-map exists, enhance detection with AST-based analysis:
+Check if repo-map exists. If not, ask the user whether to generate it for deeper analysis.
 
 ```javascript
-// Use relative path from skill directory to plugin lib
-// Path: skills/deslop/ -> ../../lib/repo-map
 const repoMap = require('../../lib/repo-map');
+
+if (!repoMap.exists(basePath)) {
+  const response = await AskUserQuestion({
+    questions: [{
+      question: 'Generate repo-map?',
+      description: 'No repo-map found. Generating one enables orphaned code and unused export detection via AST analysis. Takes ~10 seconds.',
+      options: [
+        { label: 'Yes, generate it', value: 'yes' },
+        { label: 'Skip', value: 'no' }
+      ]
+    }]
+  });
+
+  if (response === 'yes' || response?.['Generate repo-map?'] === 'yes') {
+    try {
+      await repoMap.init(basePath);
+    } catch (e) {
+      // ast-grep not available - proceed without
+    }
+  }
+}
 
 if (repoMap.exists(basePath)) {
   const map = repoMap.load(basePath);
