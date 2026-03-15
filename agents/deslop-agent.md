@@ -72,6 +72,10 @@ Always output structured JSON between markers:
 === END_RESULT ===
 ```
 
+## File Targeting
+
+When repo-intel data is available (via `/git-map`), deslop prioritizes files with recent AI-authored changes. This focuses scanning on files most likely to contain slop. If repo-intel data is unavailable, falls back to standard source file discovery.
+
 ## Constraints
 
 - Do NOT modify files - only report findings
