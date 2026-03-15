@@ -39,6 +39,32 @@ const thoroughness = args.find(a => a.startsWith('--thoroughness='))?.split('=')
 const scope = args.find(a => a.startsWith('--scope='))?.split('=')[1] ||
               args.find(a => !a.startsWith('-') && a !== 'report' && a !== 'apply') || 'all';
 
+// Pre-fetch repo-intel context for the agent
+let repoIntelContext = '';
+try {
+  const { binary } = require('@agentsys/lib');
+  const fs = require('fs');
+  const path = require('path');
+  const cwd = process.cwd();
+  const stateDir = ['.claude', '.opencode', '.codex'].find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
+  const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
+
+  if (fs.existsSync(mapFile)) {
+    const aiFiles = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'recent-ai', '--top', '30', '--map-file', mapFile, cwd]));
+    const testGaps = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'test-gaps', '--top', '20', '--map-file', mapFile, cwd]));
+
+    if (aiFiles.length > 0 || testGaps.length > 0) {
+      repoIntelContext = '\n\nRepo-intel context (use this data, do not re-scan):';
+      if (aiFiles.length > 0) {
+        repoIntelContext += '\nAI-written files (prioritize scanning these): ' + aiFiles.map(f => f.path).join(', ');
+      }
+      if (testGaps.length > 0) {
+        repoIntelContext += '\nFiles with no test coupling (escalate MEDIUM findings to HIGH in these): ' + testGaps.map(f => f.path).join(', ');
+      }
+    }
+  }
+} catch (e) { /* repo-intel unavailable */ }
+
 // Spawn agent to get findings
 const result = await Task({
   subagent_type: "deslop:deslop-agent",
@@ -46,6 +72,7 @@ const result = await Task({
 Mode: ${mode}
 Scope: ${scope}
 Thoroughness: ${thoroughness}
+${repoIntelContext}
 
 Return structured results between === DESLOP_RESULT === markers.`
 });
