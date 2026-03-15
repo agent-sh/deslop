@@ -36,7 +36,10 @@ Arguments: `[report|apply] [--scope=<path>|all|diff] [--thoroughness=quick|norma
 
 ### Phase 0: Repo-Intel Targeting (Optional)
 
-Check if repo-intel data exists. If available, use `recent-ai` to target AI-written files. If not available, ask the user whether to generate it.
+Check if repo-intel data exists. If available, use three queries to target and prioritize:
+- **`recent-ai`** - target AI-written files instead of scanning everything
+- **`test-gaps`** - flag files with no test coupling (slop in untested code is higher risk)
+- **`diff-risk`** - score files by composite risk (used in Phase 2.5 to weight findings)
 
 ```javascript
 const fs = require('fs');
@@ -48,13 +51,14 @@ const stateDir = ['.claude', '.opencode', '.codex']
 const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
 
 let aiTargetFiles = null;
+let testGapSet = new Set();
+let riskScores = new Map(); // path -> riskScore (0-1)
 
 if (!fs.existsSync(mapFile)) {
-  // No repo-intel map - ask user if they want to generate one
   const response = await AskUserQuestion({
     questions: [{
       question: 'Generate repo-intel?',
-      description: 'No repo-intel map found. Generating one lets deslop target AI-written files instead of scanning everything. Takes ~5 seconds.',
+      description: 'No repo-intel map found. Generating one lets deslop target AI-written files, flag untested code, and prioritize by risk. Takes ~5 seconds.',
       options: [
         { label: 'Yes, generate it', value: 'yes' },
         { label: 'Skip, scan all files', value: 'no' }
@@ -66,37 +70,62 @@ if (!fs.existsSync(mapFile)) {
     try {
       const { binary } = require('@agentsys/lib');
       const output = binary.runAnalyzer(['repo-intel', 'init', cwd]);
-      // Save the map
       const stateDirPath = path.join(cwd, stateDir);
       if (!fs.existsSync(stateDirPath)) fs.mkdirSync(stateDirPath, { recursive: true });
       fs.writeFileSync(mapFile, output);
     } catch (e) {
-      // Binary not available - proceed without targeting
+      // Binary not available
     }
   }
 }
 
-// If map exists (either pre-existing or just created), get AI targets
 if (fs.existsSync(mapFile)) {
   try {
     const { binary } = require('@agentsys/lib');
-    const json = binary.runAnalyzer([
+
+    // 1. AI-targeted files
+    const aiJson = binary.runAnalyzer([
       'repo-intel', 'query', 'recent-ai', '--top', '50',
       '--map-file', mapFile, cwd
     ]);
-    const results = JSON.parse(json);
-    if (results.length > 0) {
-      aiTargetFiles = results.map(r => r.path);
-      // Log what we're targeting
-      console.log(`[INFO] Targeting ${aiTargetFiles.length} AI-written files from repo-intel`);
+    const aiResults = JSON.parse(aiJson);
+    if (aiResults.length > 0) {
+      aiTargetFiles = aiResults.map(r => r.path);
+      console.log(`[INFO] Targeting ${aiTargetFiles.length} AI-written files`);
+    }
+
+    // 2. Test gaps - files with no test coupling
+    const gapsJson = binary.runAnalyzer([
+      'repo-intel', 'query', 'test-gaps', '--top', '50',
+      '--map-file', mapFile, cwd
+    ]);
+    const gaps = JSON.parse(gapsJson);
+    for (const g of gaps) testGapSet.add(g.path);
+    if (gaps.length > 0) {
+      console.log(`[INFO] ${gaps.length} files have no test coupling`);
+    }
+
+    // 3. Diff risk - composite risk scores for all scanned files
+    const filesToScore = aiTargetFiles || [];
+    if (filesToScore.length > 0) {
+      const riskJson = binary.runAnalyzer([
+        'repo-intel', 'query', 'diff-risk',
+        '--files', filesToScore.join(','),
+        '--map-file', mapFile, cwd
+      ]);
+      const risks = JSON.parse(riskJson);
+      for (const r of risks) riskScores.set(r.path, r.riskScore);
     }
   } catch (e) {
-    // Query failed - proceed with full scan
+    // Query failed - proceed without enrichment
   }
 }
 ```
 
-If `aiTargetFiles` is set, pass them to the detection script as explicit file arguments. Otherwise, fall back to scanning everything.
+**How these signals are used downstream:**
+- `aiTargetFiles`: Pass to Phase 1 detection script as explicit file list
+- `testGapSet`: In Phase 2.5, escalate findings in untested files from MEDIUM to HIGH
+- `riskScores`: In Phase 3, sort findings by risk score within each certainty tier
 
 ### Phase 1: Run Detection Script
 
@@ -182,12 +211,32 @@ if (repoMap.exists(basePath)) {
 }
 ```
 
+### Phase 2.5: Risk Weighting (Repo-Intel)
+
+If repo-intel data was gathered in Phase 0, enrich findings:
+
+```javascript
+for (const finding of findings) {
+  // Escalate findings in untested files
+  if (testGapSet.has(finding.file) && finding.certainty === 'MEDIUM') {
+    finding.certainty = 'HIGH';
+    finding.message += ' (escalated: file has no test coupling)';
+  }
+
+  // Attach risk score for sorting
+  finding.riskScore = riskScores.get(finding.file) || 0;
+}
+```
+
+**Escalation rule:** A MEDIUM-certainty finding in a file with no test coupling becomes HIGH. Rationale: slop in untested code is more dangerous because there's no test to catch regressions if the slop masks a bug.
+
 ### Phase 3: Aggregate and Prioritize
 
 Sort findings by:
 1. **Certainty**: HIGH before MEDIUM before LOW
-2. **Severity**: high before medium before low
-3. **Fix complexity**: auto-fixable before manual
+2. **Risk score**: higher riskScore first within same certainty
+3. **Severity**: high before medium before low
+4. **Fix complexity**: auto-fixable before manual
 
 ### Phase 4: Return Structured Results
 
