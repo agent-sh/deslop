@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Repo-intel integration: pre-fetch repo-intel data in `/deslop` command before agent spawn
+- Pipeline risk weighting: test-gaps escalate MEDIUM findings to HIGH; diff-risk scores sort findings within certainty tiers
+- Repo-intel and repo-map generation prompts in deslop skill (ask user when map not found)
+- AI-targeted file scanning: use `recent-ai` query to prioritize AI-written files in detection pipeline
 - Go language support with 15 slop detection patterns:
   - `placeholder_panic_go` - panic("TODO: ...") placeholder
   - `go_fmt_debugging` - fmt.Print/Println/Printf debug statements
