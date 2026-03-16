@@ -36,96 +36,17 @@ Arguments: `[report|apply] [--scope=<path>|all|diff] [--thoroughness=quick|norma
 
 ### Phase 0: Repo-Intel Targeting (Optional)
 
-Check if repo-intel data exists. If available, use three queries to target and prioritize:
+The `/deslop` command pre-fetches repo-intel data before spawning this skill and passes it as context. The pipeline library (`lib/collectors/codebase.js`) reads repo-intel automatically from the state directory - no agent action needed.
+
+If repo-intel exists, the pipeline uses three signals to target and prioritize:
 - **`recent-ai`** - target AI-written files instead of scanning everything
-- **`test-gaps`** - flag files with no test coupling (slop in untested code is higher risk)
-- **`diff-risk`** - score files by composite risk (used in Phase 2.5 to weight findings)
-
-```javascript
-const fs = require('fs');
-const path = require('path');
-
-const cwd = process.cwd();
-const stateDir = ['.claude', '.opencode', '.codex']
-  .find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
-const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
-
-let aiTargetFiles = null;
-let testGapSet = new Set();
-let riskScores = new Map(); // path -> riskScore (0-1)
-
-if (!fs.existsSync(mapFile)) {
-  const response = await AskUserQuestion({
-    questions: [{
-      question: 'Generate repo-intel?',
-      description: 'No repo-intel map found. Generating one lets deslop target AI-written files, flag untested code, and prioritize by risk. Takes ~5 seconds.',
-      options: [
-        { label: 'Yes, generate it', value: 'yes' },
-        { label: 'Skip, scan all files', value: 'no' }
-      ]
-    }]
-  });
-
-  if (response === 'yes' || response?.['Generate repo-intel?'] === 'yes') {
-    try {
-      const { binary } = require('@agentsys/lib');
-      const output = binary.runAnalyzer(['repo-intel', 'init', cwd]);
-      const stateDirPath = path.join(cwd, stateDir);
-      if (!fs.existsSync(stateDirPath)) fs.mkdirSync(stateDirPath, { recursive: true });
-      fs.writeFileSync(mapFile, output);
-    } catch (e) {
-      // Binary not available
-    }
-  }
-}
-
-if (fs.existsSync(mapFile)) {
-  try {
-    const { binary } = require('@agentsys/lib');
-
-    // 1. AI-targeted files
-    const aiJson = binary.runAnalyzer([
-      'repo-intel', 'query', 'recent-ai', '--top', '50',
-      '--map-file', mapFile, cwd
-    ]);
-    const aiResults = JSON.parse(aiJson);
-    if (aiResults.length > 0) {
-      aiTargetFiles = aiResults.map(r => r.path);
-      console.log(`[INFO] Targeting ${aiTargetFiles.length} AI-written files`);
-    }
-
-    // 2. Test gaps - files with no test coupling
-    const gapsJson = binary.runAnalyzer([
-      'repo-intel', 'query', 'test-gaps', '--top', '50',
-      '--map-file', mapFile, cwd
-    ]);
-    const gaps = JSON.parse(gapsJson);
-    for (const g of gaps) testGapSet.add(g.path);
-    if (gaps.length > 0) {
-      console.log(`[INFO] ${gaps.length} files have no test coupling`);
-    }
-
-    // 3. Diff risk - composite risk scores for all scanned files
-    const filesToScore = aiTargetFiles || [];
-    if (filesToScore.length > 0) {
-      const riskJson = binary.runAnalyzer([
-        'repo-intel', 'query', 'diff-risk',
-        '--files', filesToScore.join(','),
-        '--map-file', mapFile, cwd
-      ]);
-      const risks = JSON.parse(riskJson);
-      for (const r of risks) riskScores.set(r.path, r.riskScore);
-    }
-  } catch (e) {
-    // Query failed - proceed without enrichment
-  }
-}
-```
+- **`test-gaps`** - escalate MEDIUM findings in untested files to HIGH
+- **`diff-risk`** - attach risk scores for sorting within certainty tiers
 
 **How these signals are used downstream:**
-- `aiTargetFiles`: Pass to Phase 1 detection script as explicit file list
-- `testGapSet`: In Phase 2.5, escalate findings in untested files from MEDIUM to HIGH
-- `riskScores`: In Phase 3, sort findings by risk score within each certainty tier
+- `aiTargetFiles`: Pipeline selects these files automatically in `runPipeline()`
+- `testGapSet`: Applied inside `runPipeline()` after Phase 1 and Phase 2
+- `riskScores`: Applied inside `runPipeline()` for sorting
 
 ### Phase 1: Run Detection Script
 
@@ -134,9 +55,14 @@ The detection script is at `../../scripts/detect.js` relative to this skill.
 **Run detection** (use relative path from skill directory):
 ```bash
 # If aiTargetFiles is available from Phase 0, pass them explicitly:
-# node ../../scripts/detect.js file1.ts file2.ts --thoroughness normal --compact
+# node ../../scripts/detect.js file1.ts file2.ts --compact
 # Otherwise scan everything:
-node ../../scripts/detect.js . --thoroughness normal --compact --max 50
+node ../../scripts/detect.js . --compact --max 50
+```
+
+**For deep thoroughness** (includes CLI tools if available):
+```bash
+node ../../scripts/detect.js . --deep --compact --max 50
 ```
 
 **For diff scope** (only changed files):
@@ -144,91 +70,19 @@ node ../../scripts/detect.js . --thoroughness normal --compact --max 50
 BASE=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' || echo "main")
 # Use newline-separated list to safely handle filenames with special chars
 git diff --name-only origin/${BASE}..HEAD | \
-  xargs -d '\n' node ../../scripts/detect.js --thoroughness normal --compact
+  xargs -d '\n' node ../../scripts/detect.js --compact
 ```
 
 **Note**: The relative path `../../scripts/detect.js` navigates from `skills/deslop/` up to the plugin root where `scripts/` lives.
 
-### Phase 2: Repo-Map Enhancement (Optional)
+### Phase 2: Risk Weighting (Repo-Intel)
 
-Check if repo-map exists. If not, ask the user whether to generate it for deeper analysis.
+The pipeline automatically reads repo-intel data from `lib/collectors/codebase.js` (no agent action required). If repo-intel exists in the state directory, findings are enriched:
 
-```javascript
-const repoMap = require('../../lib/repo-map');
+- **test-gaps**: MEDIUM findings in files with no test coupling are escalated to HIGH
+- **diff-risk**: Risk scores attached to findings for sorting within certainty tiers
 
-if (!repoMap.exists(basePath)) {
-  const response = await AskUserQuestion({
-    questions: [{
-      question: 'Generate repo-map?',
-      description: 'No repo-map found. Generating one enables orphaned code and unused export detection via AST analysis. Takes ~10 seconds.',
-      options: [
-        { label: 'Yes, generate it', value: 'yes' },
-        { label: 'Skip', value: 'no' }
-      ]
-    }]
-  });
-
-  if (response === 'yes' || response?.['Generate repo-map?'] === 'yes') {
-    try {
-      await repoMap.init(basePath);
-    } catch (e) {
-      // ast-grep not available - proceed without
-    }
-  }
-}
-
-if (repoMap.exists(basePath)) {
-  const map = repoMap.load(basePath);
-  const usageIndex = repoMap.buildUsageIndex(map);
-
-  // Find orphaned infrastructure with HIGH certainty
-  const orphaned = repoMap.findOrphanedInfrastructure(map, usageIndex);
-  for (const item of orphaned) {
-    findings.push({
-      file: item.file,
-      line: item.line,
-      pattern: 'orphaned-infrastructure',
-      message: `${item.name} (${item.type}) is never used`,
-      certainty: 'HIGH',
-      severity: 'high',
-      autoFix: false
-    });
-  }
-
-  // Find unused exports
-  const unusedExports = repoMap.findUnusedExports(map, usageIndex);
-  for (const item of unusedExports) {
-    findings.push({
-      file: item.file,
-      line: item.line,
-      pattern: 'unused-export',
-      message: `Export '${item.name}' is never imported`,
-      certainty: item.certainty,
-      severity: 'medium',
-      autoFix: false
-    });
-  }
-}
-```
-
-### Phase 2.5: Risk Weighting (Repo-Intel)
-
-If repo-intel data was gathered in Phase 0, enrich findings:
-
-```javascript
-for (const finding of findings) {
-  // Escalate findings in untested files
-  if (testGapSet.has(finding.file) && finding.certainty === 'MEDIUM') {
-    finding.certainty = 'HIGH';
-    finding.message += ' (escalated: file has no test coupling)';
-  }
-
-  // Attach risk score for sorting
-  finding.riskScore = riskScores.get(finding.file) || 0;
-}
-```
-
-**Escalation rule:** A MEDIUM-certainty finding in a file with no test coupling becomes HIGH. Rationale: slop in untested code is more dangerous because there's no test to catch regressions if the slop masks a bug.
+This happens inside `runPipeline()` - the skill does not need to query repo-intel directly.
 
 ### Phase 3: Aggregate and Prioritize
 
@@ -317,11 +171,13 @@ JSON structure between markers:
 
 ## Fix Types
 
-| Fix Type | Action | Patterns |
-|----------|--------|----------|
-| `remove-line` | Delete line | debug-statement, debug-import |
-| `add-comment` | Add explanation | empty-catch |
-| `remove-block` | Delete code block | stub-function with TODO |
+These correspond to the `autoFix` values emitted by slop-patterns:
+
+| AutoFix Strategy | Action | Patterns |
+|-----------------|--------|----------|
+| `remove` | Delete line | debug-statement, debug-import, placeholder-text |
+| `add_logging` | Add proper error logging | empty-catch |
+| `replace` | Replace with corrected code | mixed-indentation |
 
 ## Error Handling
 
