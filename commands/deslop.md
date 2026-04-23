@@ -42,7 +42,10 @@ const scope = args.find(a => a.startsWith('--scope='))?.split('=')[1] ||
 // Pre-fetch repo-intel context for the agent
 let repoIntelContext = '';
 try {
-  const { binary } = require('@agentsys/lib');
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) throw new Error('CLAUDE_PLUGIN_ROOT not set');
+  const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
+  if (!repoIntel) throw new Error('agentsys is older than v5.8.6 (typed repo-intel queries unavailable) - run `/plugin marketplace update` to enable');
   const fs = require('fs');
   const path = require('path');
   const cwd = process.cwd();
@@ -50,8 +53,8 @@ try {
   const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
 
   if (fs.existsSync(mapFile)) {
-    const aiFiles = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'recent-ai', '--top', '30', '--map-file', mapFile, cwd]));
-    const testGaps = JSON.parse(binary.runAnalyzer(['repo-intel', 'query', 'test-gaps', '--top', '20', '--map-file', mapFile, cwd]));
+    const aiFiles = repoIntel.queries.recentAi(cwd, { limit: 30 });
+    const testGaps = repoIntel.queries.testGaps(cwd, { limit: 20 });
 
     if (aiFiles.length > 0 || testGaps.length > 0) {
       repoIntelContext = '\n\nRepo-intel context (use this data, do not re-scan):';
@@ -63,7 +66,10 @@ try {
       }
     }
   }
-} catch (e) { /* repo-intel unavailable */ }
+} catch (e) {
+  // Surface why we skipped so users can fix it (vs the previous silent catch).
+  console.error(`[INFO] repo-intel context skipped: ${e.message}`);
+}
 
 // Spawn agent to get findings
 const result = await Task({
