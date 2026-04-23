@@ -196,9 +196,9 @@ The orchestrator spawns `simple-fixer` to apply HIGH certainty fixes.
 
 ## Repo-Intel Data
 
-**Needs:** `<stateDir>/repo-intel.json` (in `.claude/`, `.opencode/`, or `.codex/`).
+**Expected:** the orchestrator (the command that spawned this agent) has already checked `<stateDir>/repo-intel.json` and either pre-fetched the data into your context or skipped (user declined to generate). **Do not call `AskUserQuestion` here** - subagents cannot interact with the user.
 
-**Missing?** Ask the user via `AskUserQuestion` whether to run `/repo-intel init` (~10-30s, scans git history). On decline, proceed without the data - this skill degrades gracefully.
+**If the pre-fetched data is empty**, proceed with the available context. The orchestrator has already made the decision on the user's behalf.
 
-**Binary:** `agent-analyzer` auto-downloads to `~/.agent-sh/bin/` from `agent-sh/agent-analyzer` GitHub releases (~10 MB) on first use. The `lib/agentsys` resolver locates the agentsys install (CC marketplace clone, npm global, or sibling repo) - users see a clear error message if neither agentsys nor the binary can be found.
+**Binary:** `agent-analyzer` auto-downloads to `~/.agent-sh/bin/` from `agent-sh/agent-analyzer` GitHub releases (~10 MB) on first use. The `lib/agentsys` resolver locates the agentsys install (CC marketplace clone, npm global, or sibling repo).
 
