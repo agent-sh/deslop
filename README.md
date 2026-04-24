@@ -100,7 +100,14 @@ Auto-fixes all HIGH certainty findings, then runs the project's test suite. If t
 
 ## Supported Languages
 
-JavaScript/TypeScript, Python, Rust, Go, Java/Kotlin, C/C++.
+Two layers, two coverage stories:
+
+| Layer | Languages | Detection |
+|-------|-----------|-----------|
+| **Analyzer slop queries** (when `repo-intel.json` present) | JavaScript/TypeScript, Python, Rust, Go, Java | tree-sitter AST: empty error handling per language idiom, tautological assertions across major test frameworks, orphan exports, cliché-name clusters, wrapper towers, single-impl traits, high-bug communities |
+| **Regex pipeline** (always) | JavaScript/TypeScript, Python, Rust, Go, Java | universal patterns (debug statements, trailing whitespace, mixed indentation, placeholder text), language-specific patterns where defined |
+
+Kotlin, C/C++, and Shell files are walked but no language-specific detectors are bundled today; only universal regex patterns apply. Tracked in [#27](https://github.com/agent-sh/agent-analyzer/issues/27).
 
 ## Requirements
 
