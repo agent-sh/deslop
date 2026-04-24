@@ -102,6 +102,46 @@ describe('repo-intel-signals', () => {
     test('returns null for unknown action', () => {
       expect(signals.toDeslopFix({ action: 'mystery', path: 'x' })).toBeNull();
     });
+
+    test('returns null for delete-lines without a valid lines array', () => {
+      expect(
+        signals.toDeslopFix({ action: 'delete-lines', path: 'x', category: 'c', reason: 'r' })
+      ).toBeNull();
+      expect(
+        signals.toDeslopFix({
+          action: 'delete-lines',
+          path: 'x',
+          lines: [42],
+          category: 'c',
+          reason: 'r'
+        })
+      ).toBeNull();
+      expect(
+        signals.toDeslopFix({
+          action: 'delete-lines',
+          path: 'x',
+          lines: ['a', 'b'],
+          category: 'c',
+          reason: 'r'
+        })
+      ).toBeNull();
+    });
+
+    test('returns null for replace-lines without a valid lines array', () => {
+      expect(
+        signals.toDeslopFix({
+          action: 'replace-lines',
+          path: 'x',
+          with: 'y',
+          category: 'c',
+          reason: 'r'
+        })
+      ).toBeNull();
+    });
+
+    test('returns null for delete-file without a path', () => {
+      expect(signals.toDeslopFix({ action: 'delete-file', category: 'c', reason: 'r' })).toBeNull();
+    });
   });
 
   describe('targetsToFileList', () => {
