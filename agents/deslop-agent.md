@@ -74,7 +74,12 @@ Always output structured JSON between markers:
 
 ## File Targeting
 
-When repo-intel data is available (via `/git-map`), deslop prioritizes files with recent AI-authored changes. This focuses scanning on files most likely to contain slop. If repo-intel data is unavailable, falls back to standard source file discovery.
+When `repo-intel.json` exists in the platform state directory, the deslop pipeline pulls two analyzer queries before scanning:
+
+- **`slop-fixes`** — pinpoint structured fixes (tracked artifacts, stale CI configs, duplicate tooling, orphan exports, empty catches, tautological tests). These are HIGH-certainty, auto-fixable, and flow directly into the `fixes` array tagged `source: "analyzer-slop-fixes"`. No detection re-run needed.
+- **`slop-targets`** — ranked Sonnet/Opus scan candidates with `suspect` labels (defensive-cargo-cult / bot-authored / cliché-names / wrapper-tower / single-impl / high-bug-community, plus stylistic-outlier and semantic-duplicate when the embedder is installed). The pipeline uses the file list as `targetFiles` so the regex/AST scan only looks where slop is likely.
+
+When repo-intel data is unavailable, falls back to scanning the full source tree (capped at `--max`).
 
 ## Constraints
 

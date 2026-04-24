@@ -1,7 +1,7 @@
 ---
 name: deslop
-description: "Use when user wants to clean AI slop from code. Use for cleanup, remove debug statements, find ghost code, repo hygiene."
-version: 5.1.0
+description: "Use when user wants to clean AI slop from code. Use for cleanup, remove debug statements, find ghost code, repo hygiene, deslop. Pulls analyzer-supplied slop-fixes (tracked artifacts, orphan exports, empty catches, tautological tests) and slop-targets (defensive cargo cult, bot-authored, wrapper towers, single-impl, stylistic outliers, semantic duplicates) when repo-intel exists; falls back to regex+AST detection otherwise."
+version: 5.2.0
 argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
 ---
 
@@ -34,19 +34,32 @@ Arguments: `[report|apply] [--scope=<path>|all|diff] [--thoroughness=quick|norma
 
 ## Detection Pipeline
 
-### Phase 0: Repo-Intel Targeting (Optional)
+### Phase 0: Analyzer-Supplied Slop (when repo-intel exists)
 
-The `/deslop` command pre-fetches repo-intel data before spawning this skill and passes it as context. The pipeline library (`lib/collectors/codebase.js`) reads repo-intel automatically from the state directory - no agent action needed.
+When the repo has been analyzed (`/repo-intel init` or `enrich`), the analyzer pre-computes two query results that drop straight into the pipeline — no detection needed for the first, narrowed scan for the second.
 
-If repo-intel exists, the pipeline uses three signals to target and prioritize:
-- **`recent-ai`** - target AI-written files instead of scanning everything
-- **`test-gaps`** - escalate MEDIUM findings in untested files to HIGH
-- **`diff-risk`** - attach risk scores for sorting within certainty tiers
+**`slop-fixes` — pinpoint structured fixes (Haiku-tier)**
 
-**How these signals are used downstream:**
-- `aiTargetFiles`: Pipeline selects these files automatically in `runPipeline()`
-- `testGapSet`: Applied inside `runPipeline()` after Phase 1 and Phase 2
-- `riskScores`: Applied inside `runPipeline()` for sorting
+The analyzer-supplied fixes are HIGH-certainty, pre-located, and self-contained (file + line range + action + reason). They flow directly into the `fixes` array without re-running detection. Categories: tracked artifacts, stale CI configs, duplicate tooling, orphan exports, empty catches, tautological tests.
+
+**`slop-targets` — ranked Sonnet/Opus scan candidates**
+
+A scored list of files (Sonnet tier) and cross-file areas (Opus tier) where slop is *likely*. Used as the `targetFiles` input to the detection pipeline so we scan only suspicious files instead of everything. Suspect labels (defensive-cargo-cult / could-be-shorter / bot-authored / cliché-names / wrapper-tower / single-impl / high-bug-community / and — when the embedder is installed — stylistic-outlier / semantic-duplicate) let downstream tooling pick a tailored reviewer prompt per file.
+
+The `lib/repo-intel-signals` module wraps both queries:
+
+```javascript
+const signals = require('../../lib/repo-intel-signals');
+
+const fixes = signals.getSlopFixes(cwd);          // {fixes:[…]} or null
+const targets = signals.getSlopTargets(cwd);      // {targets:[…]} or null
+const targetFiles = signals.targetsToFileList(targets);
+const directFixes = (fixes?.fixes || [])
+  .map(signals.toDeslopFix)
+  .filter(Boolean);
+```
+
+When repo-intel is absent, all helpers return `null` and the pipeline falls back to the unguided (scan-everything) behavior. **No agent action needed** beyond passing `targetFiles` through to `runPipeline()`.
 
 ### Phase 1: Run Detection Script
 
@@ -77,24 +90,24 @@ git diff --name-only origin/${BASE}..HEAD | \
 
 ### Phase 2: Risk Weighting (Repo-Intel)
 
-The pipeline automatically reads repo-intel data from `lib/collectors/codebase.js` (no agent action required). If repo-intel exists in the state directory, findings are enriched:
+The pipeline automatically reads repo-intel data via `lib/collectors/git.js` and the slop-targets `suspect` labels (no agent action required). If repo-intel exists in the state directory, findings are enriched:
 
-- **test-gaps**: MEDIUM findings in files with no test coupling are escalated to HIGH
-- **diff-risk**: Risk scores attached to findings for sorting within certainty tiers
-
-This happens inside `runPipeline()` - the skill does not need to query repo-intel directly.
+- **test-gaps** + **bugspots**: MEDIUM findings in untested high-bug files are escalated to HIGH
+- **slop-targets suspect**: when a finding lands in a file flagged as `defensive-cargo-cult` or `bot-authored`, severity is bumped one level
+- **stylistic-outlier / semantic-duplicate** (embedder only): findings in these files get a `nlp:<suspect>` annotation for the reviewer prompt
 
 ### Phase 3: Aggregate and Prioritize
 
 Sort findings by:
 1. **Certainty**: HIGH before MEDIUM before LOW
-2. **Risk score**: higher riskScore first within same certainty
-3. **Severity**: high before medium before low
-4. **Fix complexity**: auto-fixable before manual
+2. **Tier**: analyzer-supplied (Phase 0) before pipeline-detected
+3. **Score**: slop-targets score (descending) within same certainty
+4. **Severity**: high before medium before low
+5. **Fix complexity**: auto-fixable before manual
 
 ### Phase 4: Return Structured Results
 
-Skill returns structured JSON - does NOT apply fixes (orchestrator handles that).
+Skill returns structured JSON - does NOT apply fixes (orchestrator handles that). The merged result includes both analyzer-supplied fixes (Phase 0) and pipeline-detected findings (Phase 1/1b/2), with a `source` field per fix so consumers can tell them apart.
 
 ## Output Format
 
@@ -148,10 +161,19 @@ JSON structure between markers:
 
 ### HIGH Certainty (Auto-Fixable)
 
+Analyzer-supplied (Phase 0, `slop-fixes` query):
+- `tracked-artifact`: log files at root, .DS_Store, .swp/.bak/.orig, coverage/.nyc_output trees
+- `stale-ci-config`: .travis.yml / appveyor.yml / .drone.yml when an active CI is also present
+- `duplicate-tooling`: ESLint+Biome, Prettier+Biome, multiple JS lockfiles
+- `orphan-export`: file exports with zero importers in the project graph (skips entry points)
+- `empty-catch` (analyzer): TS/JS empty catch blocks, Python `except: pass`
+- `tautological-test`: `expect(x).toBe(x)` assertions
+
+Pipeline-detected (Phase 1, regex):
 - `debug-statement`: console.log, console.debug, print, println!
 - `debug-import`: Unused debug/logging imports
 - `placeholder-text`: "Lorem ipsum", "TODO: implement"
-- `empty-catch`: Empty catch blocks without comment
+- `empty-catch` (pipeline): Empty catch blocks without comment
 - `trailing-whitespace`: Trailing whitespace
 - `mixed-indentation`: Mixed tabs/spaces
 

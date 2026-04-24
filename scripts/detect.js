@@ -109,11 +109,40 @@ Examples:
   }
 
   try {
+    // Pull analyzer-supplied slop signals when repo-intel exists. Both
+    // helpers return null if the analyzer / artifact are unavailable;
+    // the pipeline degrades to its scan-everything default in that case.
+    let analyzerFixes = [];
+    let analyzerTargetFiles = null;
+    try {
+      const signals = require(path.join(libPath, '..', 'lib', 'repo-intel-signals'));
+      const fixesResult = signals.getSlopFixes(options.path);
+      if (fixesResult && Array.isArray(fixesResult.fixes)) {
+        analyzerFixes = fixesResult.fixes
+          .map(signals.toDeslopFix)
+          .filter(Boolean);
+      }
+      const targetsResult = signals.getSlopTargets(options.path, { top: 30 });
+      const list = signals.targetsToFileList(targetsResult);
+      if (list.length > 0) analyzerTargetFiles = list;
+    } catch (e) {
+      // Module load failure: continue without analyzer signals.
+    }
+
     // runPipeline takes (repoPath, options) - async function
     const result = await runPipeline(options.path, {
       mode: options.mode,
-      thoroughness: options.thoroughness
+      thoroughness: options.thoroughness,
+      targetFiles: analyzerTargetFiles || undefined
     });
+
+    // Merge analyzer fixes into the result up front so consumers see a
+    // single unified list. Tag each entry with `source` for traceability.
+    if (analyzerFixes.length > 0) {
+      result.fixes = (analyzerFixes).concat(result.fixes || []);
+      result.summary = result.summary || {};
+      result.summary.analyzerSuppliedFixes = analyzerFixes.length;
+    }
 
     formatFindings(result, options.compact, options.maxFindings);
 
