@@ -53,17 +53,14 @@ try {
   const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
 
   if (fs.existsSync(mapFile)) {
-    const aiFiles = repoIntel.queries.recentAi(cwd, { limit: 30 });
+    // AI-authorship signal (recentAi) was removed from agent-analyzer — the binary
+    // no longer attributes AI vs human, so that query is gone. Test-coupling gaps
+    // remain the useful slop-prioritization signal.
     const testGaps = repoIntel.queries.testGaps(cwd, { limit: 20 });
 
-    if (aiFiles.length > 0 || testGaps.length > 0) {
+    if (testGaps.length > 0) {
       repoIntelContext = '\n\nRepo-intel context (use this data, do not re-scan):';
-      if (aiFiles.length > 0) {
-        repoIntelContext += '\nAI-written files (prioritize scanning these): ' + aiFiles.map(f => f.path).join(', ');
-      }
-      if (testGaps.length > 0) {
-        repoIntelContext += '\nFiles with no test coupling (escalate MEDIUM findings to HIGH in these): ' + testGaps.map(f => f.path).join(', ');
-      }
+      repoIntelContext += '\nFiles with no test coupling (escalate MEDIUM findings to HIGH in these): ' + testGaps.map(f => f.path).join(', ');
     }
   }
 } catch (e) {
