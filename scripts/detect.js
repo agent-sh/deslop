@@ -3,7 +3,7 @@
  * Slop Detection CLI
  * Runs the detection pipeline and outputs structured findings
  *
- * Usage: node detect.js [path] [--apply] [--deep] [--compact]
+ * Usage: node detect.js [path] [file ...] [--files-from FILE|-] [--apply] [--deep] [--compact]
  */
 
 const path = require('path');
@@ -19,8 +19,11 @@ function parseArgs(args) {
     mode: 'report',
     thoroughness: 'normal',
     compact: false,
-    maxFindings: 10
+    maxFindings: 10,
+    files: [],
+    filesFrom: null
   };
+  let sawPath = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -34,8 +37,12 @@ function parseArgs(args) {
       options.compact = true;
     } else if (arg === '--max' && args[i + 1]) {
       options.maxFindings = parseInt(args[++i], 10);
+    } else if (arg === '--files-from' && args[i + 1]) {
+      options.filesFrom = args[++i];
     } else if (!arg.startsWith('-')) {
-      options.path = arg;
+      // First positional is the repo path; the rest are files inside it to scan.
+      if (sawPath) options.files.push(arg);
+      else { options.path = arg; sawPath = true; }
     }
   }
 
@@ -82,9 +89,14 @@ async function main() {
     console.log(`
 Slop Detection CLI
 
-Usage: node detect.js [path] [options]
+Usage: node detect.js [path] [file ...] [options]
+
+  With files after the path (relative to it), only those files are scanned.
+  Without them, up to 200 source files are scanned (tests excluded), or the
+  repo-intel slop targets when a map exists.
 
 Options:
+  --files-from F  Read files to scan, one per line, from F ('-' for stdin)
   --apply      Apply auto-fixes (default: report only)
   --deep       Deep analysis with all analyzers
   --quick      Quick regex-only scan
@@ -95,6 +107,7 @@ Options:
 Examples:
   node detect.js                    # Scan current directory
   node detect.js src/               # Scan src/ directory
+  git diff --name-only main... | node detect.js . --files-from -   # Scan changed files
   node detect.js --apply --compact  # Fix and show compact results
 `);
     process.exit(0);
@@ -129,11 +142,24 @@ Examples:
       // Module load failure: continue without analyzer signals.
     }
 
+    // Explicit files win over the analyzer's targets: the caller asked for exactly these.
+    let explicitFiles = options.files.slice();
+    if (options.filesFrom) {
+      const text = fs.readFileSync(options.filesFrom === '-' ? 0 : options.filesFrom, 'utf8');
+      explicitFiles = explicitFiles.concat(text.split(/\r?\n/).map(l => l.trim()).filter(Boolean));
+    }
+    explicitFiles = explicitFiles.filter(f => fs.existsSync(path.join(options.path, f)));
+
+    if ((options.files.length > 0 || options.filesFrom) && explicitFiles.length === 0) {
+      formatFindings({ findings: [], summary: { total: 0, bySeverity: {} } }, options.compact, options.maxFindings);
+      return;
+    }
+
     // runPipeline takes (repoPath, options) - async function
     const result = await runPipeline(options.path, {
       mode: options.mode,
       thoroughness: options.thoroughness,
-      targetFiles: analyzerTargetFiles || undefined
+      targetFiles: explicitFiles.length > 0 ? explicitFiles : (analyzerTargetFiles || undefined)
     });
 
     // Merge analyzer fixes into the result up front so consumers see a

@@ -1,226 +1,86 @@
 ---
 name: deslop
 description: "Use when the user asks to clean AI slop from code: 'deslop', 'clean up slop', 'remove debug statements', 'find ghost code', 'repo hygiene'. Detects slop with regex, AST and optional repo-intel signals, then reports or applies fixes."
-version: 5.3.0
+version: 5.4.0
 argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
 ---
 
 # deslop
 
-Clean AI slop from code with certainty-based findings and auto-fixes.
+Find AI slop in a codebase (debug output, placeholders, empty catches, stub functions, dead code, tracked artifacts) and return findings ranked by certainty, with a list of fixes that are safe to apply without review. This skill only reads; the caller applies fixes.
 
-## Parse Arguments
+Arguments: `$ARGUMENTS`
 
-```javascript
-const args = '$ARGUMENTS'.split(' ').filter(Boolean);
-const mode = args.find(a => ['report', 'apply'].includes(a)) || 'report';
-const scope = args.find(a => a.startsWith('--scope='))?.split('=')[1] || 'all';
-const thoroughness = args.find(a => a.startsWith('--thoroughness='))?.split('=')[1] || 'normal';
-```
+- **mode**: `report` (default) or `apply`. The mode is passed through to the result; it does not change what you scan.
+- **--scope**: `all` (default), `diff` (files changed on this branch), or a path.
+- **--thoroughness**: `quick` (regex only), `normal` (default, adds multi-pass analyzers), `deep` (adds jscpd, madge and similar CLI tools when installed).
 
-## Input
+## Detection
 
-Arguments: `[report|apply] [--scope=<path>|all|diff] [--thoroughness=quick|normal|deep]`
+The detector is `scripts/detect.js` at the plugin root, two directories up from this skill. Resolve it to an absolute path and run it from the repository root. It prints JSON by default (`findings`, `summary`); `--compact` prints a short markdown table without the `autoFix` field, so use the JSON when building fixes. Add `--quick` or `--deep` for those thoroughness levels.
 
-- **Mode**: `report` (default) or `apply`
-- **Scope**: What to scan
-  - `all` (default): Entire codebase
-  - `diff`: Only files changed in current branch
-  - `<path>`: Specific directory or file
-- **Thoroughness**: Analysis depth (default: `normal`)
-  - `quick`: Regex patterns only
-  - `normal`: + multi-pass analyzers
-  - `deep`: + CLI tools (jscpd, madge) if available
-
-## Detection Pipeline
-
-### Phase 0: Analyzer-Supplied Slop (when repo-intel exists)
-
-When the repo has been analyzed (`/repo-intel init` or `enrich`), the analyzer pre-computes two query results that drop straight into the pipeline — no detection needed for the first, narrowed scan for the second.
-
-**`slop-fixes` — pinpoint structured fixes (Haiku-tier)**
-
-The analyzer-supplied fixes are HIGH-certainty, pre-located, and self-contained (file + line range + action + reason). They flow directly into the `fixes` array without re-running detection. Categories: tracked artifacts, stale CI configs, duplicate tooling, orphan exports, empty catches, tautological tests.
-
-**`slop-targets` — ranked Sonnet/Opus scan candidates**
-
-A scored list of files (Sonnet tier) and cross-file areas (Opus tier) where slop is *likely*. Used as the `targetFiles` input to the detection pipeline so we scan only suspicious files instead of everything. Suspect labels (defensive-cargo-cult / could-be-shorter / bot-authored / cliché-names / wrapper-tower / single-impl / high-bug-community / and — when the embedder is installed — stylistic-outlier / semantic-duplicate) let downstream tooling pick a tailored reviewer prompt per file.
-
-The `lib/repo-intel-signals` module wraps both queries:
-
-```javascript
-const signals = require('../../lib/repo-intel-signals');
-
-const fixes = signals.getSlopFixes(cwd);          // {fixes:[…]} or null
-const targets = signals.getSlopTargets(cwd);      // {targets:[…]} or null
-const targetFiles = signals.targetsToFileList(targets);
-const directFixes = (fixes?.fixes || [])
-  .map(signals.toDeslopFix)
-  .filter(Boolean);
-```
-
-When repo-intel is absent, all helpers return `null` and the pipeline falls back to the unguided (scan-everything) behavior. **No agent action needed** beyond passing `targetFiles` through to `runPipeline()`.
-
-### Phase 1: Run Detection Script
-
-The detection script is at `../../scripts/detect.js` relative to this skill.
-
-**Run detection** (use relative path from skill directory):
 ```bash
-# If aiTargetFiles is available from Phase 0, pass them explicitly:
-# node ../../scripts/detect.js file1.ts file2.ts --compact
-# Otherwise scan everything:
-node ../../scripts/detect.js . --compact --max 50
+node <plugin>/scripts/detect.js .                                   # scope all
+node <plugin>/scripts/detect.js . src/api.js src/auth.js            # scope path: the files under it
+git diff --name-only --diff-filter=d "origin/$BASE"...HEAD \
+  | node <plugin>/scripts/detect.js . --files-from -                # scope diff
 ```
 
-**For deep thoroughness** (includes CLI tools if available):
-```bash
-node ../../scripts/detect.js . --deep --compact --max 50
-```
+For diff scope, `BASE` is the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` with `origin/` stripped, or `main`. Files after the repo path (or from `--files-from`) are exactly what gets scanned, relative to the repo root. Without them the detector scans at most 200 source files and skips tests, or only the repo-intel slop targets when a map exists, so a whole-repo run is a sample: say so in the result when `metadata.filesAnalyzed` is 200 or targeting was on. For a path scope, list its files (`git ls-files <path>`) and pass them, rather than passing the path as the repo root.
 
-**For diff scope** (only changed files):
-```bash
-BASE=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@' || echo "main")
-# Use newline-separated list to safely handle filenames with special chars
-git diff --name-only origin/${BASE}..HEAD | \
-  xargs -d '\n' node ../../scripts/detect.js --compact
-```
+Finding paths are relative to the repo root. Exit code 2 means critical findings exist, not that the run failed. On a large repo the JSON is long: read `summary` first and filter `findings` by certainty with `node -e` or `jq` rather than reading all of it.
 
-**Note**: The relative path `../../scripts/detect.js` navigates from `skills/deslop/` up to the plugin root where `scripts/` lives.
+When the repo has repo-intel data, the detector folds in the analyzer's pre-located fixes. [references/repo-intel.md](references/repo-intel.md) covers what that adds and the one query you run yourself (files without test coupling).
 
-### Phase 2: Risk Weighting (Repo-Intel)
+Pattern names, certainty rules and fix strategies per language are in [../../references/slop-categories.md](../../references/slop-categories.md).
 
-The pipeline automatically reads repo-intel data via `lib/collectors/git.js` and the slop-targets `suspect` labels (no agent action required). If repo-intel exists in the state directory, findings are enriched:
+## Judgment
 
-- **test-gaps** + **bugspots**: MEDIUM findings in untested high-bug files are escalated to HIGH
-- **slop-targets suspect**: when a finding lands in a file flagged as `defensive-cargo-cult` or `bot-authored`, severity is bumped one level
-- **stylistic-outlier / semantic-duplicate** (embedder only): findings in these files get a `nlp:<suspect>` annotation for the reviewer prompt
+The detector is a pattern matcher. Before a finding goes into `fixes`, read the line and confirm it is slop in this codebase:
 
-### Phase 3: Aggregate and Prioritize
+- `console.log`, `print` and `fmt.Println` in a CLI entry point or a logger are the program's output, not debugging. Drop those findings.
+- An empty catch with a comment explaining why is deliberate. Keep it out of `fixes`.
+- A finding in a test fixture, a generated file, or vendored code is not the repo's slop. Build output, `vendor/`, `node_modules/`, minified and generated files, and lockfiles are skipped by the detector; skip anything else of that kind you see.
+- In files with no test coupling, a wrong fix goes unnoticed. Rank their findings first in the report, and leave them out of `fixes` unless certainty is HIGH on its own.
 
-Sort findings by:
-1. **Certainty**: HIGH before MEDIUM before LOW
-2. **Tier**: analyzer-supplied (Phase 0) before pipeline-detected
-3. **Score**: slop-targets score (descending) within same certainty
-4. **Severity**: high before medium before low
-5. **Fix complexity**: auto-fixable before manual
+Only HIGH certainty findings with a real fix strategy become fixes. MEDIUM and LOW stay in `findings` for a human.
 
-### Phase 4: Return Structured Results
+`autoFix: "remove"` means the matched text is slop, not always the whole line. Pick the fix that removes exactly that:
 
-Skill returns structured JSON - does NOT apply fixes (orchestrator handles that). The merged result includes both analyzer-supplied fixes (Phase 0) and pipeline-detected findings (Phase 1/1b/2), with a `source` field per fix so consumers can tell them apart.
+- The whole line is slop (a debug print, an unused debug import): `remove-line`.
+- Only part of the line is (trailing whitespace, a trailing `// see #42` comment after live code): `replace` with the corrected line. Deleting it would delete the code in front.
+- The finding spans lines (`commented_code` reports its range in `details.startLine` and `details.endLine`): `remove-line` with `endLine` set from `details.endLine`.
 
-## Output Format
+## Output
 
-JSON structure between markers:
+Return this block last. `/deslop` and `/next-task` parse the JSON between the markers and hand `fixes` to whatever applies them.
 
 ```
 === DESLOP_RESULT ===
 {
-  "mode": "report|apply",
-  "scope": "all|diff|path",
-  "filesScanned": N,
+  "mode": "report",
+  "scope": "all",
+  "filesScanned": 120,
   "findings": [
-    {
-      "file": "src/api.js",
-      "line": 42,
-      "pattern": "debug-statement",
-      "message": "console.log found",
-      "certainty": "HIGH",
-      "severity": "medium",
-      "autoFix": true,
-      "fixType": "remove-line"
-    }
+    { "file": "src/api.js", "line": 42, "pattern": "console_debugging", "message": "console.log found",
+      "certainty": "HIGH", "severity": "medium", "autoFix": "remove", "untested": false }
   ],
   "fixes": [
-    {
-      "file": "src/api.js",
-      "line": 42,
-      "fixType": "remove-line",
-      "pattern": "debug-statement"
-    }
+    { "file": "src/api.js", "line": 42, "fixType": "remove-line", "pattern": "console_debugging" }
   ],
-  "summary": {
-    "high": N,
-    "medium": N,
-    "low": N,
-    "autoFixable": N
-  }
+  "summary": { "high": 1, "medium": 0, "low": 0, "autoFixable": 1 }
 }
 === END_RESULT ===
 ```
 
-## Certainty Levels
+Paths are relative to the repository root. `fixType` is one of:
 
-| Level | Meaning | Action |
-|-------|---------|--------|
-| **HIGH** | Definitely slop, safe to auto-fix | Auto-fix in apply mode |
-| **MEDIUM** | Likely slop, needs verification | Review first |
-| **LOW** | Possible slop, context-dependent | Flag only |
+| fixType | From | Meaning |
+|---------|------|---------|
+| `remove-line` | detector `autoFix: "remove"` when the whole line or range is slop, analyzer `delete-lines` | Delete `line`, or `line` through `endLine`. |
+| `add-comment` | detector `autoFix: "add_logging"` | Empty catch: log the error if the file has a logger, else add a comment saying it is ignored on purpose, in the file's comment syntax. |
+| `replace` | detector `autoFix: "replace"`, `"remove"` on part of a line, analyzer `replace-lines` | Replace `line` (through `endLine` if set) with `replacement`. |
+| `remove-block` | multi-line constructs | Delete the whole block starting at `line`. |
+| `delete-file` | analyzer `delete-file` | Remove the tracked file (artifacts such as `.DS_Store`). |
 
-## Pattern Categories
-
-### HIGH Certainty (Auto-Fixable)
-
-Analyzer-supplied (Phase 0, `slop-fixes` query):
-- `tracked-artifact`: log files at root, .DS_Store, .swp/.bak/.orig, coverage/.nyc_output trees
-- `stale-ci-config`: .travis.yml / appveyor.yml / .drone.yml when an active CI is also present
-- `duplicate-tooling`: ESLint+Biome, Prettier+Biome, multiple JS lockfiles
-- `orphan-export`: file exports with zero importers in the project graph (skips entry points)
-- `empty-catch` (analyzer): TS/JS empty catch blocks, Python `except: pass`
-- `tautological-test`: `expect(x).toBe(x)` assertions
-
-Pipeline-detected (Phase 1, regex):
-- `debug-statement`: console.log, console.debug, print, println!
-- `debug-import`: Unused debug/logging imports
-- `placeholder-text`: "Lorem ipsum", "TODO: implement"
-- `empty-catch` (pipeline): Empty catch blocks without comment
-- `trailing-whitespace`: Trailing whitespace
-- `mixed-indentation`: Mixed tabs/spaces
-
-### MEDIUM Certainty (Review Required)
-
-- `excessive-comments`: Comment/code ratio > 2:1
-- `doc-code-ratio`: JSDoc > 3x function body
-- `stub-function`: Returns placeholder value only
-- `dead-code`: Unreachable after return/throw
-- `infrastructure-without-impl`: DB clients created but never used
-
-### LOW Certainty (Flag Only)
-
-- `over-engineering`: File/export ratio > 20x
-- `buzzword-inflation`: Claims without evidence
-- `shotgun-surgery`: Files frequently change together
-
-## Fix Types
-
-These correspond to the `autoFix` values emitted by slop-patterns:
-
-| AutoFix Strategy | Action | Patterns |
-|-----------------|--------|----------|
-| `remove` | Delete line | debug-statement, debug-import, placeholder-text |
-| `add_logging` | Add proper error logging | empty-catch |
-| `replace` | Replace with corrected code | mixed-indentation |
-
-## Error Handling
-
-- **Git not available**: Skip git-dependent checks
-- **Invalid scope**: Return error in JSON
-- **Parse errors**: Skip file, continue scan
-
-## Integration
-
-This skill is invoked by:
-- `deslop-agent` for `/deslop` command
-- `/next-task` Phase 8 (pre-review gates) with `scope=diff`, when next-task is installed
-
-In apply mode the `/deslop` command applies HIGH certainty fixes itself.
-
-
-## Repo-Intel Data
-
-**Expected:** the orchestrator (the command that spawned this agent) has already checked `<stateDir>/repo-intel.json` and either pre-fetched the data into your context or skipped (user declined to generate). **Do not call `AskUserQuestion` here** - subagents cannot interact with the user.
-
-**If the pre-fetched data is empty**, proceed with the available context. The orchestrator has already made the decision on the user's behalf.
-
-**Binary:** `agent-analyzer` auto-downloads to `~/.agent-sh/bin/` from `agent-sh/agent-analyzer` GitHub releases (~10 MB) on first use. The `lib/agentsys` resolver locates the agentsys install (CC marketplace clone, npm global, or sibling repo).
-
+If git is missing, skip git-based checks and say so. If the scope path does not exist, return the block with empty arrays and an `"error"` field. A file that fails to parse is skipped and the scan continues.

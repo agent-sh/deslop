@@ -52,7 +52,7 @@ deslop uses a 3-phase detection pipeline with increasing analysis depth:
 | `normal` (default) | Phase 1 + 2 | Seconds |
 | `deep` | Phase 1 + 2 + 3 | Depends on CLI tools |
 
-**Repo-intel integration** - when repo-intel data is available, deslop targets AI-written files first (`recent-ai` query) and escalates MEDIUM findings to HIGH for files with no test coverage (`test-gaps` query).
+**Repo-intel integration** - when repo-intel data is available, deslop takes the analyzer's pre-located fixes (`slop-fixes`), scans the files it ranks as likely slop first (`slop-targets`), and lists findings in files with no test coverage first (`test-gaps`). Those findings are not auto-fixed on that basis, because nothing would catch a wrong fix there.
 
 ## Certainty Levels
 
@@ -82,7 +82,7 @@ Outputs a prioritized table of findings with certainty levels and suggested fixe
 /deslop apply src/ 10
 ```
 
-Auto-fixes all HIGH certainty findings, then runs the project's test suite. If tests fail, all changes are rolled back with `git restore .` and the failing fix is reported.
+Auto-fixes the HIGH certainty findings, then runs the project's test suite. Files that already have uncommitted changes are skipped. If tests fail, only the files deslop edited are restored (`git restore -- <files>`) and the failing fix is reported; your other uncommitted work is left alone.
 
 ### Scope Options
 
