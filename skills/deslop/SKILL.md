@@ -51,6 +51,12 @@ The detector is a pattern matcher. Before a finding goes into `fixes`, read the 
 
 Only HIGH certainty findings with a real fix strategy become fixes. MEDIUM and LOW stay in `findings` for a human.
 
+`autoFix: "remove"` means the matched text is slop, not always the whole line. Pick the fix that removes exactly that:
+
+- The whole line is slop (a debug print, an unused debug import): `remove-line`.
+- Only part of the line is (trailing whitespace, a trailing `// see #42` comment after live code): `replace` with the corrected line. Deleting it would delete the code in front.
+- The finding spans lines (`commented_code` reports its range in `details.startLine` and `details.endLine`): `remove-line` with `endLine` set from `details.endLine`.
+
 ## Output
 
 Return this block last. `/deslop` and `/next-task` parse the JSON between the markers and hand `fixes` to whatever applies them.
@@ -77,9 +83,9 @@ Paths are relative to the repository root. `fixType` is one of:
 
 | fixType | From | Meaning |
 |---------|------|---------|
-| `remove-line` | detector `autoFix: "remove"`, analyzer `delete-lines` | Delete `line`, or `line` through `endLine`. |
+| `remove-line` | detector `autoFix: "remove"` when the whole line or range is slop, analyzer `delete-lines` | Delete `line`, or `line` through `endLine`. |
 | `add-comment` | detector `autoFix: "add_logging"` | Empty catch: log the error if the file has a logger, else add a comment saying it is ignored on purpose, in the file's comment syntax. |
-| `replace` | detector `autoFix: "replace"`, analyzer `replace-lines` | Replace `line` through `endLine` with `replacement`. |
+| `replace` | detector `autoFix: "replace"`, `"remove"` on part of a line, analyzer `replace-lines` | Replace `line` (through `endLine` if set) with `replacement`. |
 | `remove-block` | multi-line constructs | Delete the whole block starting at `line`. |
 | `delete-file` | analyzer `delete-file` | Remove the tracked file (artifacts such as `.DS_Store`). |
 
