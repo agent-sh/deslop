@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-23
+
+### Changed
+- `/deslop apply` applies HIGH certainty fixes itself with Edit instead of spawning `next-task:simple-fixer`, so it works without the next-task plugin.
+- `/deslop` on a harness without Task (Codex, OpenCode) runs the deslop skill in the current session instead of stalling.
+- Skill description cut to one trigger sentence (under 40 words) so Codex does not truncate it.
+
+
 ### Added
 - Repo-intel integration: pre-fetch repo-intel data in `/deslop` command before agent spawn
 - Pipeline risk weighting: test-gaps escalate MEDIUM findings to HIGH; diff-risk scores sort findings within certainty tiers

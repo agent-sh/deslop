@@ -118,7 +118,7 @@ Kotlin, C/C++, and Shell files are walked but no language-specific detectors are
 
 ## Related Plugins
 
-- [next-task](https://github.com/agent-sh/next-task) - invokes deslop in Phase 8 pre-review gates
+- [next-task](https://github.com/agent-sh/next-task) - optional; invokes deslop in its Phase 8 pre-review gates
 - [enhance](https://github.com/agent-sh/enhance) - broader code quality analysis
 - [audit-project](https://github.com/agent-sh/audit-project) - multi-agent code review
 
