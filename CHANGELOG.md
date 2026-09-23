@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-24
+
+### Changed
+- Rewrote the `/deslop` command, `deslop-agent` and the `deslop` skill for current models: goal, constraints with their reasons, a definition of done and one output contract, in place of phase pseudocode and three differing result shapes.
+- One `DESLOP_RESULT` shape (findings array, fixes array, summary) and one `fixType` table, mapped from the detector's `autoFix` values and the analyzer's actions. The agent had documented a different `findings` object and the command a different fix vocabulary.
+- The skill tells the model to check each HIGH finding before it becomes a fix: `console.log` in a CLI entry point is output, not debugging.
+- Files with no test coupling are ranked first and marked `untested`, but no longer promoted from MEDIUM into auto-applied fixes: an unverified fix in untested code is the one nobody catches.
+- The test-gaps lookup moved from a JavaScript block in the command (which had no `node` permission to run it) into the skill, as a `node -e` command. Repo-intel detail moved to `skills/deslop/references/repo-intel.md`.
+- `--scope=diff` scans the repo and filters to changed files. The old recipe piped files to `detect.js`, which scans only its last path argument and reports nothing for a single file.
+- `/deslop apply` skips files that already have uncommitted changes and reverts only the files it edited (`git restore -- <files>`) instead of `git restore .`, which discarded all of the user's uncommitted work on a test failure. It commits only the files it edited.
+
 ## [1.1.0] - 2026-09-23
 
 ### Changed

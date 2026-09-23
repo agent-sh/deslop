@@ -2,105 +2,41 @@
 description: This skill should be used when the user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene", or mentions "AI slop", "code cleanup", "slop detection".
 codex-description: 'Use when user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene". Detects and removes AI-generated slop patterns.'
 argument-hint: "[report|apply] [--scope=path] [--thoroughness=quick|normal|deep]"
-allowed-tools: Task, Read, Edit, Bash(git:*)
+allowed-tools: Task, Skill, Read, Edit, Glob, Grep, Bash(git:*), Bash(node:*)
 ---
 
-# /deslop - AI Slop Cleanup
+# /deslop
 
-Senior maintainer performing periodic repo hygiene. Mission: remove AI-generated slop while preserving behavior and minimizing diffs.
-
-## Constraints (Priority Order)
-
-When constraints conflict, follow this priority:
-
-1. **Preserve behavior and public APIs** (highest priority)
-2. **Minimal diffs** - do not reformat unrelated code
-3. **Prefer deletion over invention**
-4. **No new dependencies or abstractions**
-5. **Respect repo conventions** (check CLAUDE.md/AGENTS.md)
+Remove AI slop from a repository while keeping its behavior and public API intact, with the smallest diff that does it.
 
 ## Arguments
 
-Parse from $ARGUMENTS or use defaults:
+From `$ARGUMENTS`:
 
-- **Mode**: `report` (default) or `apply`
-- **Scope**: `all` (default), `diff`, or path
-- **Thoroughness**: `quick`, `normal` (default), or `deep`
+- **mode**: `report` (default) or `apply`.
+- **scope**: `--scope=<all|diff|path>`, or a bare path. Default `all`.
+- **thoroughness**: `--thoroughness=quick|normal|deep`. Default `normal`.
 
-## Execution
+If the scope is a path that does not exist, reply `Path not found: <path>` and stop.
 
-**Without Task** (Codex, OpenCode): skip the agent spawn and run the `deslop` skill directly in this session with the same mode, scope and thoroughness. It returns the same `=== DESLOP_RESULT ===` block, so Phase 2 onward is unchanged.
+## Scan
 
-### Phase 1: Spawn Deslop Agent
+Spawn `deslop:deslop-agent` with:
 
-```javascript
-// Parse arguments
-const args = '$ARGUMENTS'.split(' ').filter(Boolean);
-const mode = args.includes('apply') ? 'apply' : 'report';
-const thoroughness = args.find(a => a.startsWith('--thoroughness='))?.split('=')[1] || 'normal';
-const scope = args.find(a => a.startsWith('--scope='))?.split('=')[1] ||
-              args.find(a => !a.startsWith('-') && a !== 'report' && a !== 'apply') || 'all';
+```
+Scan for AI slop patterns.
+Mode: {mode}
+Scope: {scope}
+Thoroughness: {thoroughness}
 
-// Pre-fetch repo-intel context for the agent
-let repoIntelContext = '';
-try {
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (!pluginRoot) throw new Error('CLAUDE_PLUGIN_ROOT not set');
-  const { repoIntel } = require(`${pluginRoot}/lib/agentsys`).get();
-  if (!repoIntel) throw new Error('agentsys is older than v5.8.6 (typed repo-intel queries unavailable) - run `/plugin marketplace update` to enable');
-  const fs = require('fs');
-  const path = require('path');
-  const cwd = process.cwd();
-  const stateDir = ['.claude', '.opencode', '.codex'].find(d => fs.existsSync(path.join(cwd, d))) || '.claude';
-  const mapFile = path.join(cwd, stateDir, 'repo-intel.json');
-
-  if (fs.existsSync(mapFile)) {
-    // AI-authorship signal (recentAi) was removed from agent-analyzer — the binary
-    // no longer attributes AI vs human, so that query is gone. Test-coupling gaps
-    // remain the useful slop-prioritization signal.
-    const testGaps = repoIntel.queries.testGaps(cwd, { limit: 20 });
-
-    if (testGaps.length > 0) {
-      repoIntelContext = '\n\nRepo-intel context (use this data, do not re-scan):';
-      repoIntelContext += '\nFiles with no test coupling (escalate MEDIUM findings to HIGH in these): ' + testGaps.map(f => f.path).join(', ');
-    }
-  }
-} catch (e) {
-  // Surface why we skipped so users can fix it (vs the previous silent catch).
-  console.error(`[INFO] repo-intel context skipped: ${e.message}`);
-}
-
-// Spawn agent to get findings
-const result = await Task({
-  subagent_type: "deslop:deslop-agent",
-  prompt: `Scan for AI slop patterns.
-Mode: ${mode}
-Scope: ${scope}
-Thoroughness: ${thoroughness}
-${repoIntelContext}
-
-Return structured results between === DESLOP_RESULT === markers.`
-});
+Return structured results between === DESLOP_RESULT === markers.
 ```
 
-### Phase 2: Parse Agent Results
+Without the Task tool (Codex, OpenCode), load the `deslop` skill in this session with the same arguments. It produces the same block.
 
-Extract structured JSON from agent output:
+Read the JSON between `=== DESLOP_RESULT ===` and `=== END_RESULT ===`. If it is missing or does not parse, show what came back and stop; do not apply anything.
 
-```javascript
-function parseDeslop(output) {
-  const match = output.match(/=== DESLOP_RESULT ===[\s\S]*?({[\s\S]*?})[\s\S]*?=== END_RESULT ===/);
-  return match ? JSON.parse(match[1]) : { fixes: [] };
-}
-
-const findings = parseDeslop(result);
-```
-
-### Phase 3: Handle Mode
-
-#### Report Mode (Default)
-
-Present findings as markdown table:
+## Report mode
 
 ```markdown
 ## Slop Hotspots
@@ -108,8 +44,7 @@ Present findings as markdown table:
 | Priority | File | Issue | Certainty | Fix |
 |----------|------|-------|-----------|-----|
 | 1 | src/api.js:42 | console.log | HIGH | auto |
-| 2 | src/auth.js:15 | empty catch | HIGH | auto |
-| 3 | lib/utils.js:88 | excessive comments | MEDIUM | review |
+| 2 | lib/utils.js:88 | excessive comments | MEDIUM | review |
 
 ## Summary
 
@@ -123,18 +58,18 @@ Present findings as markdown table:
 - [ ] Review MEDIUM certainty items manually
 ```
 
-#### Apply Mode
+List findings marked `untested` first and say they have no test coverage.
 
-If the fixes array is non-empty, apply the fixes in this session with the Edit tool. No other plugin is needed.
+## Apply mode
 
-For each fix in `findings.fixes`:
-- `remove-line`: delete the line at the given line number
-- `add-comment`: add `// Error intentionally ignored` to the empty catch
-- `remove-block`: delete the whole code block
+Apply `fixes` yourself with Edit (the `fixType` meanings are in the skill's output section). No other plugin is needed.
 
-Work bottom-up within each file so earlier line numbers stay valid. Then run the verification below and commit with `fix: clean up AI slop (auto-applied)`.
+- Git is required, because the rollback depends on it. Without git, reply `Git required for rollback safety` and stop.
+- Skip any fix in a file that already has uncommitted changes, and list it as skipped. Reverting a failed fix restores the whole file, and that must not take the user's own edits with it.
+- Keep each change to the fix itself: no reformatting, no new dependencies or abstractions, deletion over invention, and follow the repo's CLAUDE.md or AGENTS.md conventions. When these pull against each other, preserving behavior and public APIs wins.
+- Within a file, apply fixes from the bottom up so earlier line numbers stay valid.
 
-Present results:
+Then run the project's test command (`npm test`, `pytest`, `cargo test`, `go test ./...`, or whatever the repo uses). If the harness asks permission for it, that is expected. If tests fail, run `git restore -- <the files you edited>`, report which fix broke them, and stop. If they pass, commit only the files you edited with `fix: clean up AI slop (auto-applied)`.
 
 ```markdown
 ## Applied Fixes
@@ -142,7 +77,6 @@ Present results:
 | File | Line | Fix |
 |------|------|-----|
 | src/api.js | 42 | remove-line (console.log) |
-| src/auth.js | 15 | add-comment (empty catch) |
 
 **Total**: N fixes applied
 
@@ -153,37 +87,6 @@ Present results:
 | lib/utils.js | 88 | excessive comments | MEDIUM |
 ```
 
-## Verification Strategy
+Add a `Skipped` table when any fix was skipped, with the reason.
 
-After fixes are applied, run project's test command:
-
-```bash
-npm test
-# or pytest, cargo test, go test ./...
-```
-
-On failure: `git restore .` and report which change failed.
-
-## Ignore Zones
-
-Skip these paths (handled by detection script):
-- Build artifacts: `dist/`, `build/`, `target/`, `out/`, `.next/`
-- Vendored: `vendor/`, `node_modules/`, `**/*.min.*`
-- Generated: `**/*.gen.*`, lockfiles
-
-## Error Handling
-
-- Git not available: Exit with "Git required for rollback safety"
-- Invalid scope path: Exit with "Path not found: <path>"
-- Verification fails: Rollback with `git restore .`, report failure
-
-## Additional Resources
-
-### Reference Files
-
-For detailed pattern documentation, consult:
-- **`references/slop-categories.md`** - All pattern categories, severity levels, certainty thresholds, auto-fix strategies
-
-### Scripts
-
-- **`scripts/detect.js`** - Detection pipeline CLI (run with `--help` for options)
+Pattern catalog and fix strategies: `references/slop-categories.md`. Detector CLI: `scripts/detect.js --help`.
