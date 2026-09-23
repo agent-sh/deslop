@@ -1,6 +1,6 @@
 {
   "name": "@agentsys/deslop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI slop cleanup with minimal diffs and behavior preservation",
   "author": {
     "name": "Avi Fenesh",

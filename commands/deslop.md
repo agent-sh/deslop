@@ -2,7 +2,7 @@
 description: This skill should be used when the user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene", or mentions "AI slop", "code cleanup", "slop detection".
 codex-description: 'Use when user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene". Detects and removes AI-generated slop patterns.'
 argument-hint: "[report|apply] [--scope=path] [--thoroughness=quick|normal|deep]"
-allowed-tools: Task, Read
+allowed-tools: Task, Read, Edit, Bash(git:*)
 ---
 
 # /deslop - AI Slop Cleanup
@@ -28,6 +28,8 @@ Parse from $ARGUMENTS or use defaults:
 - **Thoroughness**: `quick`, `normal` (default), or `deep`
 
 ## Execution
+
+**Without Task** (Codex, OpenCode): skip the agent spawn and run the `deslop` skill directly in this session with the same mode, scope and thoroughness. It returns the same `=== DESLOP_RESULT ===` block, so Phase 2 onward is unchanged.
 
 ### Phase 1: Spawn Deslop Agent
 
@@ -123,25 +125,14 @@ Present findings as markdown table:
 
 #### Apply Mode
 
-If fixes array is non-empty, spawn simple-fixer:
+If the fixes array is non-empty, apply the fixes in this session with the Edit tool. No other plugin is needed.
 
-```javascript
-if (mode === 'apply' && findings?.fixes?.length > 0) {
-  await Task({
-    subagent_type: "next-task:simple-fixer",
-    model: "haiku",
-    prompt: `Apply these slop fixes:
-${JSON.stringify(findings.fixes, null, 2)}
+For each fix in `findings.fixes`:
+- `remove-line`: delete the line at the given line number
+- `add-comment`: add `// Error intentionally ignored` to the empty catch
+- `remove-block`: delete the whole code block
 
-For each fix:
-- remove-line: Delete the line at the specified line number
-- add-comment: Add "// Error intentionally ignored" to empty catch
-- remove-block: Delete the entire code block
-
-Use Edit tool to apply. Commit message: "fix: clean up AI slop (auto-applied)"`
-  });
-}
-```
+Work bottom-up within each file so earlier line numbers stay valid. Then run the verification below and commit with `fix: clean up AI slop (auto-applied)`.
 
 Present results:
 

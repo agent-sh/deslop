@@ -41,7 +41,7 @@ From the skill results, extract items where:
 
 Valid autoFix strategies: `'remove'`, `'replace'`, `'add_logging'`
 
-Build the `fixes` array for orchestrator to pass to simple-fixer.
+Build the `fixes` array for the orchestrator to apply.
 
 ### 4. Return Structured Results
 

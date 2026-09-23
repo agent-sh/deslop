@@ -1,7 +1,7 @@
 ---
 name: deslop
-description: "Use when user wants to clean AI slop from code. Use for cleanup, remove debug statements, find ghost code, repo hygiene, deslop. Pulls analyzer-supplied slop-fixes (tracked artifacts, orphan exports, empty catches, tautological tests) and slop-targets (defensive cargo cult, bot-authored, wrapper towers, single-impl, stylistic outliers, semantic duplicates) when repo-intel exists; falls back to regex+AST detection otherwise."
-version: 5.2.0
+description: "Use when the user asks to clean AI slop from code: 'deslop', 'clean up slop', 'remove debug statements', 'find ghost code', 'repo hygiene'. Detects slop with regex, AST and optional repo-intel signals, then reports or applies fixes."
+version: 5.3.0
 argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
 ---
 
@@ -153,7 +153,7 @@ JSON structure between markers:
 
 | Level | Meaning | Action |
 |-------|---------|--------|
-| **HIGH** | Definitely slop, safe to auto-fix | Auto-fix via simple-fixer |
+| **HIGH** | Definitely slop, safe to auto-fix | Auto-fix in apply mode |
 | **MEDIUM** | Likely slop, needs verification | Review first |
 | **LOW** | Possible slop, context-dependent | Flag only |
 
@@ -211,9 +211,9 @@ These correspond to the `autoFix` values emitted by slop-patterns:
 
 This skill is invoked by:
 - `deslop-agent` for `/deslop` command
-- `/next-task` Phase 8 (pre-review gates) with `scope=diff`
+- `/next-task` Phase 8 (pre-review gates) with `scope=diff`, when next-task is installed
 
-The orchestrator spawns `simple-fixer` to apply HIGH certainty fixes.
+In apply mode the `/deslop` command applies HIGH certainty fixes itself.
 
 
 ## Repo-Intel Data
