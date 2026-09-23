@@ -1,13 +1,13 @@
 # Repo-intel signals
 
-repo-intel is an optional analysis the agentsys `agent-analyzer` binary writes to `<stateDir>/repo-intel.json`, where `<stateDir>` is the first of `.claude`, `.opencode`, `.codex` that exists in the repo. It is created by `/repo-intel init`. The binary downloads to `~/.agent-sh/bin/` on first use. When the file is missing, every step here is skipped and the scan covers the whole tree.
+repo-intel is an optional analysis the agentsys `agent-analyzer` binary writes to `<stateDir>/repo-intel.json`, where `<stateDir>` is the first of `.claude`, `.opencode`, `.codex` that exists in the repo. It is created by `/repo-intel init`. The binary downloads to `~/.agent-sh/bin/` on first use. When the file is missing, every step here is skipped.
 
 ## What detect.js does with it
 
 `scripts/detect.js` reads two analyzer queries through `lib/repo-intel-signals.js` before scanning. You do not call them.
 
 - **slop-fixes**: pre-located HIGH certainty fixes (tracked artifacts, stale CI configs, duplicate tooling, orphan exports, empty catches, tautological tests). They appear in the detector's top-level `fixes` array with `source: "analyzer-slop-fixes"` and a `fixType` already set (`delete-file`, `remove-line` with `endLine`, or `replace` with `replacement`). Carry them into the result's `fixes` as they are, after the same judgment check as any other fix.
-- **slop-targets**: files and areas where slop is likely, ranked by score. The detector scans only those files when the list is non-empty. The `suspect` labels (for example `defensive-cargo-cult`, `bot-authored`, `wrapper-tower`, `single-impl`) are a hint about what kind of slop to look for when you read a finding.
+- **slop-targets**: files and areas where slop is likely, ranked by score. On a run without explicit files, the detector scans only these (top 30), so treat that run as a sample. The `suspect` labels (for example `defensive-cargo-cult`, `bot-authored`, `wrapper-tower`, `single-impl`) are a hint about what kind of slop to look for when you read a finding.
 
 ## Test coupling: the query you run
 

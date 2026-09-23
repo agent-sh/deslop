@@ -17,26 +17,20 @@ Arguments: `$ARGUMENTS`
 
 ## Detection
 
-The detector is `scripts/detect.js` at the plugin root, two directories up from this skill. Resolve it to an absolute path and run it from the repository root. It prints JSON by default (`findings`, `summary`); `--compact` prints a short markdown table without the `autoFix` field, so use the JSON when building fixes.
+The detector is `scripts/detect.js` at the plugin root, two directories up from this skill. Resolve it to an absolute path and run it from the repository root. It prints JSON by default (`findings`, `summary`); `--compact` prints a short markdown table without the `autoFix` field, so use the JSON when building fixes. Add `--quick` or `--deep` for those thoroughness levels.
 
 ```bash
-node <plugin>/scripts/detect.js <path>            # normal
-node <plugin>/scripts/detect.js <path> --quick    # quick
-node <plugin>/scripts/detect.js <path> --deep     # deep
+node <plugin>/scripts/detect.js .                                   # scope all
+node <plugin>/scripts/detect.js . src/api.js src/auth.js            # scope path: the files under it
+git diff --name-only --diff-filter=d "origin/$BASE"...HEAD \
+  | node <plugin>/scripts/detect.js . --files-from -                # scope diff
 ```
 
-`detect.js` scans a directory. Given a single file it reports nothing, and given several paths it scans only the last. So for `--scope=diff`, or a path that is a file, scan the enclosing directory (the repo root for diff) and keep only the findings in the files you care about:
+For diff scope, `BASE` is the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` with `origin/` stripped, or `main`. Files after the repo path (or from `--files-from`) are exactly what gets scanned, relative to the repo root. Without them the detector scans at most 200 source files and skips tests, or only the repo-intel slop targets when a map exists, so a whole-repo run is a sample: say so in the result when `metadata.filesAnalyzed` is 200 or targeting was on. For a path scope, list its files (`git ls-files <path>`) and pass them, rather than passing the path as the repo root.
 
-```bash
-BASE=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'); BASE=${BASE:-main}
-git diff --name-only --diff-filter=d "origin/$BASE"...HEAD
-```
+Finding paths are relative to the repo root. Exit code 2 means critical findings exist, not that the run failed. On a large repo the JSON is long: read `summary` first and filter `findings` by certainty with `node -e` or `jq` rather than reading all of it.
 
-Finding paths are relative to the directory you scanned; convert them to repo-root paths for the result.
-
-Exit code 2 means critical findings exist, not that the run failed. On a large repo the JSON is long: read `summary` first and filter `findings` by certainty with `node -e` or `jq` rather than reading all of it.
-
-When the repo has repo-intel data, the detector already folds in the analyzer's pre-located fixes and narrows the scan to likely files. [references/repo-intel.md](references/repo-intel.md) covers what that adds and the one query you run yourself (files without test coupling). Without repo-intel, the scan covers the whole tree; that is fine.
+When the repo has repo-intel data, the detector folds in the analyzer's pre-located fixes. [references/repo-intel.md](references/repo-intel.md) covers what that adds and the one query you run yourself (files without test coupling).
 
 Pattern names, certainty rules and fix strategies per language are in [../../references/slop-categories.md](../../references/slop-categories.md).
 

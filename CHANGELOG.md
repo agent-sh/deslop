@@ -10,7 +10,7 @@
 - The skill tells the model to check each HIGH finding before it becomes a fix: `console.log` in a CLI entry point is output, not debugging.
 - Files with no test coupling are ranked first and marked `untested`, but no longer promoted from MEDIUM into auto-applied fixes: an unverified fix in untested code is the one nobody catches.
 - The test-gaps lookup moved from a JavaScript block in the command (which had no `node` permission to run it) into the skill, as a `node -e` command. Repo-intel detail moved to `skills/deslop/references/repo-intel.md`.
-- `--scope=diff` scans the repo and filters to changed files. The old recipe piped files to `detect.js`, which scans only its last path argument and reports nothing for a single file.
+- `scripts/detect.js` takes files to scan after the repo path, or `--files-from FILE|-`, and scans exactly those. `--scope=diff` pipes the changed files in. The old recipe piped files as extra paths, which the CLI dropped (it kept only the last) and a single file path returned nothing. A whole-repo run is a sample (200 source files, no tests, or the repo-intel targets) and the skill says so.
 - `/deslop apply` skips files that already have uncommitted changes and reverts only the files it edited (`git restore -- <files>`) instead of `git restore .`, which discarded all of the user's uncommitted work on a test failure. It commits only the files it edited.
 
 ## [1.1.0] - 2026-09-23
