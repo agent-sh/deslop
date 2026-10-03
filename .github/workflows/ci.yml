@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   ci:
-    uses: agent-sh/.github/.github/workflows/ci-node.yml@main
+    uses: agent-sh/.github/.github/workflows/ci-node.yml@ecb3c8c0c8bdad8308ba68462d98cbcca1ccaa93
     secrets: inherit
 
   agnix:
-    uses: agent-sh/.github/.github/workflows/ci-agnix.yml@main
+    uses: agent-sh/.github/.github/workflows/ci-agnix.yml@ecb3c8c0c8bdad8308ba68462d98cbcca1ccaa93
