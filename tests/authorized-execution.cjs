@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const benchmark = require('../lib/perf/benchmark-runner');
 const { runProfiling } = require('../lib/perf/profiling-runner');
 const { runBreakingPointSearch } = require('../lib/perf/breaking-point-runner');
@@ -55,6 +56,33 @@ test('command data, JSON flags, and invalid policy results cannot launch a bench
   // Interpreter source is ordinary data too; denying it must precede execution.
   const source = 'require("node:fs").writeFileSync(' + quote(f.marker) + ',"started")';
   assert.throws(() => benchmark.runBenchmark(quote(process.execPath) + ' -e ' + quote(source), f.options), denied);
+  assert.equal(f.records().length, 0);
+}));
+
+test('native promises from other realms and overridden promise methods deny without leaking rejections', () => fixture(async f => {
+  const approvals = [
+    vm.runInNewContext('() => Promise.reject(new Error("controlled-realm-policy-error"))'),
+    vm.runInNewContext('() => Promise.resolve(true)'),
+    () => {
+      const rejected = Promise.reject(new Error('controlled-instance-policy-error'));
+      for (const key of ['catch', 'then']) {
+        Object.defineProperty(rejected, key, { get() { throw new Error('controlled-method-policy-error'); } });
+      }
+      return rejected;
+    },
+    () => {
+      const fulfilled = Promise.resolve(true);
+      Object.defineProperty(fulfilled, 'constructor', { get() { throw new Error('controlled-cleanup-error'); } });
+      return fulfilled;
+    },
+    () => ({ get then() { throw new Error('controlled-thenable-error'); } })
+  ];
+  for (const approve of approvals) {
+    assert.throws(() => benchmark.runBenchmark(f.command, f.options, approve), denied);
+    assert.equal(f.records().length, 0);
+  }
+  // The test runner observes unhandled rejections across the event-loop boundary.
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.records().length, 0);
 }));
 
