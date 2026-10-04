@@ -122,6 +122,43 @@ Kotlin, C/C++, and Shell files are walked but no language-specific detectors are
 - [enhance](https://github.com/agent-sh/enhance) - broader code quality analysis
 - [audit-project](https://github.com/agent-sh/audit-project) - multi-agent code review
 
+## Host authorization for command execution
+
+The bundled benchmark, profiling and custom-source helpers treat command strings and
+policy responses as data. They now deny process execution unless trusted host code
+supplies a separate synchronous `authorizeExecution(request)` callback. Only literal
+`true` approves a launch. Missing callbacks, JSON flags, promises and policy errors
+deny it. Authorization failures expose a generic error without policy details.
+
+Migration for callers:
+
+- `runBenchmark(command, options, authorizeExecution)`
+- `runBenchmarkSeries(command, options, authorizeExecution)`
+- `runProfiling(options, authorizeExecution)`
+- `runBreakingPointSearch(options, authorizeExecution)`,
+  `runConstraintTest(options, authorizeExecution)` and
+  `runOptimizationExperiment(options, authorizeExecution)`
+- `probeCLI(toolName, authorizeExecution)`,
+  `buildCustomConfig(type, name, authorizeExecution)` and
+  `parseAndCachePolicy(responses, authorizeExecution)`
+
+Each launch has its own immutable request containing the final executable, argv,
+platform, Windows shim plan, absolute cwd, effective environment and spawn options.
+Approve that complete invocation from a trusted policy or an operator decision.
+Profiler overrides and optimization warmup are separate launches. Never construct the
+callback from remote input, deserialize executable JavaScript, or return `true`
+unconditionally for untrusted data. Authority is never saved in source preferences.
+
+`isToolAvailable(command)` and `checkTool(command, versionFlag)` now accept only their
+existing fixed availability checks. Unknown commands and flags return unavailable.
+Use the callback-bound custom probe for an operator-approved additional CLI.
+Pure parsing and Windows argument planning remain available without approval.
+
+Approval permits host execution. It does not isolate filesystem, network or credentials,
+or make project code safe. Use a separate sandbox when the approved program or inspected
+repository needs isolation. Host code owns executable lookup, repository contents and
+environment policy, including PATH and interpreter startup variables.
+
 ## License
 
 MIT

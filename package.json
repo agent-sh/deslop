@@ -21,7 +21,7 @@
     "slop-detection"
   ],
   "scripts": {
-    "test": "jest"
+    "test": "jest && node --test tests/authorized-execution.cjs"
   },
   "devDependencies": {
     "jest": "^30.5.2"
