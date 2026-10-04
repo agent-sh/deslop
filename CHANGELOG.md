@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- Windows batch-shim launches explicitly disable delayed expansion so literal exclamation
+  marks in arguments remain intact even when the user's command processor enables it.
+
 ## [1.2.0] - 2026-09-24
 
 ### Changed
