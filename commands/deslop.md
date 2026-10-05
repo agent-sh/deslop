@@ -1,5 +1,5 @@
 ---
-description: This skill should be used when the user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene", or mentions "AI slop", "code cleanup", "slop detection".
+description: "Find AI slop (debug output, placeholders, empty catches, dead code) and, on request, remove it with minimal, behavior-preserving diffs. Use for 'deslop', 'clean up slop', 'slop detection', 'code cleanup', 'find debug statements', 'remove console.logs', 'remove AI artifacts', 'repo hygiene'."
 codex-description: 'Use when user asks to "clean up slop", "remove AI artifacts", "deslop the codebase", "find debug statements", "remove console.logs", "repo hygiene". Detects and removes AI-generated slop patterns.'
 argument-hint: "[report|apply] [--scope=path] [--thoroughness=quick|normal|deep]"
 allowed-tools: Task, Skill, Read, Edit, Glob, Grep, Bash(git:*), Bash(node:*)

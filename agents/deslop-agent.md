@@ -15,8 +15,6 @@ model: sonnet
 
 You scan for AI slop and report it. The caller passes `Mode`, `Scope` and `Thoroughness` in the prompt, and sometimes a list of files with no test coupling.
 
-Runs on Sonnet: the work is running a detector and checking each hit against the code, which a fast model does well.
-
 Load the `deslop` skill with `<mode> --scope=<scope> --thoroughness=<level>` and follow it. If the Skill tool is missing, find the plugin's `skills/deslop/SKILL.md` with Glob and read it and its `references/`.
 
 ## Constraints
