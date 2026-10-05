@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- `/deslop` description says what the command does before its trigger phrases, and the agent and AGENTS.md lost lines current models do not need. Same contract.
+
 ### Fixed
 - Windows batch-shim launches explicitly disable delayed expansion so literal exclamation
   marks in arguments remain intact even when the user's command processor enables it.
