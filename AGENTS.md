@@ -20,7 +20,7 @@ This repo is the deslop plugin: AI slop cleanup with minimal diffs that preserve
 - `skills/deslop/SKILL.md`: detection, judgment and the output contract; repo-intel detail in `skills/deslop/references/repo-intel.md`.
 - `references/slop-categories.md`: pattern catalog and fix strategies per language.
 - `scripts/detect.js`: the detector CLI (`--help`).
-- `lib/repo-intel-signals.js` and `lib/agentsys.js` are this repo's. The rest of `lib/` is synced from [agent-core](https://github.com/agent-sh/agent-core), so change it there.
+- `lib/` is synced from [agent-core](https://github.com/agent-sh/agent-core), including `lib/agentsys.js`, so change shared code there. These are local and edited here: `lib/repo-intel-signals.js`, `lib/utils/command-execution.js` and the nine host-authorization files listed in agent-core's [sync-exclude.json](https://github.com/agent-sh/agent-core/blob/main/sync-exclude.json) (`lib/patterns/cli-enhancers.js`, `lib/platform/verify-tools.js`, the benchmark, breaking-point, constraint, optimization and profiling runners in `lib/perf/`, `lib/sources/custom-handler.js` and `lib/sources/policy-questions.js`). The sync skips those nine.
 
 ## Checks
 
