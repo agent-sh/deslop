@@ -3,7 +3,8 @@
 ## [Unreleased]
 
 ### Changed
-- `/deslop` description says what the command does before its trigger phrases, and the agent and AGENTS.md lost lines current models do not need. Same contract.
+- `/deslop` description says what the command does (report by default, remove on request) before its trigger phrases, and the agent and AGENTS.md lost lines current models do not need. Same contract.
+- `.agnix.toml` no longer disables the six rules that existed only for the old generated AGENTS.md, so the lint covers the new one.
 
 ### Fixed
 - Windows batch-shim launches explicitly disable delayed expansion so literal exclamation
