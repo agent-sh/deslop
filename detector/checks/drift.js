@@ -49,6 +49,8 @@ function definedNames(text, l) {
 }
 
 // old -> new token pairs from a removed line and the added line that reads most like it.
+const VERSION_KEY = /^\s*"?version"?\s*[:=]/;
+
 function replacementPairs(file, headText) {
   const pairs = new Map();
   for (const b of file.blocks) {
@@ -59,6 +61,8 @@ function replacementPairs(file, headText) {
         const s = similar(r.text, a.text);
         if (s > bestScore) { best = a; bestScore = s; }
       }
+      // A manifest's version line pairs with its replacement however many digits changed.
+      if (!best && MANIFEST.test(file.path) && VERSION_KEY.test(r.text)) best = b.added.find((a) => VERSION_KEY.test(a.text)) || null;
       if (!best) continue;
       const rt = tokens(r.text);
       const at = tokens(best.text);
@@ -177,11 +181,12 @@ module.exports = {
       const parts = f.oldPath.split('/');
       for (let i = 1; i < parts.length; i++) {
         const d = parts.slice(0, i).join('/');
-        if (!ctx.dirs.has(d) && d.includes('/')) goneDirs.add(d);
+        if (!ctx.dirs.has(d)) goneDirs.add(d);
       }
     }
     for (const d of goneDirs) {
-      if (!retired.has(d)) retired.set(d, { from: d, line: 0, text: '', why: 'file' });
+      // A bare top-level name ("runners") is a word; with its slash it is a path.
+      if (d.includes('/') && !retired.has(d)) retired.set(d, { from: d, line: 0, text: '', why: 'file' });
       if (!retired.has(d + '/')) retired.set(d + '/', { from: d, line: 0, text: '', why: 'file' });
     }
     const candidates = [];
@@ -229,7 +234,12 @@ module.exports = {
           // package name stands in ("tool@0.4.1", "tool 0.4.1").
           const near = neighbors(v.text, t);
           const pkg = ty === 'version' && packageName(ctx, v.from, v.text);
-          if (pkg) near.push(pkg.toLowerCase());
+          if (pkg) {
+            near.push(pkg.toLowerCase());
+            v.byNameOnly = true;
+            // A dependency range (^1.3.0, >=1.3.0) in another manifest still admits the new version.
+            hs = hs.filter((h) => !MANIFEST.test(h.file) && !new RegExp(`[\\^~>=<]\\s*v?${t.replace(/[.]/g, '\\.')}`).test(h.text));
+          }
           // Other entries of the file being edited are other entities; the author saw them.
           hs = hs.filter((h) => ctx.kindOf(h.file) !== 'test' && h.file !== v.from && (ty === 'number' || near.some((w) => h.text.toLowerCase().includes(w))));
         }
@@ -251,7 +261,9 @@ module.exports = {
       for (const h of shown) {
         items.push({
           check: 'stale-mention',
-          severity: v.why === 'replaced' && (ty === 'ident' || ty === 'name') ? 'review' : 'high',
+          // Named only through the package (a README line mentioning the old version) may be
+          // a historical statement; the agent decides.
+          severity: v.why === 'replaced' && (ty === 'ident' || ty === 'name' || v.byNameOnly) ? 'review' : 'high',
           file: h.file,
           line: h.line,
           excerpt: h.text.trim().slice(0, 160),

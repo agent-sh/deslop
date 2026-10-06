@@ -18,7 +18,9 @@ const SWALLOW = /\|\|\s*true\b|2>\s*\/dev\/null|set \+e\b|except(\s+\w+(\s+as\s+
 const SH_PASS = /\b(PASS(ED)?|GREEN|OK|SUCCESS|all (tests )?pass(ed)?)\b/;
 // Ways a shell test can go red: an explicit failing exit, errexit in any spelling, a fail
 // helper, or a success marker printed only after a command chain succeeds.
-const SH_FAIL = /\bexit\s+("?\$|[1-9])|\breturn\s+[1-9]|\b(fail|die|abort)\s*\(|\b(fail|die)\b\s|set\s+-[a-z]*e|set\s+-o\s+errexit|^#!.*\s-[a-z]*e\b|\bfalse\b|\[\[?.*\]\]?\s*\|\|\s*exit|&&\s*(echo|printf)\b[^\n]*\b(PASS|OK|GREEN|SUCCESS)/m;
+const SH_FAIL = /\bexit\s+("?\$|[1-9])|\breturn\s+[1-9]|\b(fail|die|abort)\s*\(|\b(fail|die)\b\s|set\s+-[a-z]*e|set\s+-o\s+errexit|^#!.*\s-[a-z]*e\b|\bfalse\b|\[\[?.*\]\]?\s*\|\|\s*exit/m;
+// "cmd && echo PASS" reports success only when cmd succeeded, unless "|| echo FAIL" follows.
+const GUARDED_PASS = /&&\s*(echo|printf)\b(?![^\n]*\|\|)/;
 
 // Body of a test that starts at index i (0-based) in lines, by brace or indentation.
 function body(lines, i, l) {
@@ -60,7 +62,9 @@ module.exports = {
       const addedLines = new Set(f.added.map((a) => a.line));
       if (l === 'sh' && (f.status === 'A' || f.whole)) {
         const all = lines.join('\n');
-        if (SH_PASS.test(all) && !SH_FAIL.test(all)) {
+        const passLines = lines.filter((ln) => SH_PASS.test(ln) && /\b(echo|printf)\b/.test(ln));
+        const allGuarded = passLines.length > 0 && passLines.every((ln) => GUARDED_PASS.test(ln));
+        if (SH_PASS.test(all) && !SH_FAIL.test(all) && !allGuarded) {
           items.push({ check: 'test-cannot-fail', severity: 'high', file: f.path, line: 1, excerpt: '(whole script)', message: 'prints a success marker but has no failing exit path (no exit 1, set -e or fail helper)' });
         }
       }

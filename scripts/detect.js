@@ -65,10 +65,11 @@ function main(argv) {
   if (!isRepo(root)) throw new Error(`${root} is not a git repository`);
   // Paths in git output are relative to the top level; run from there. A subdirectory given
   // as the repo narrows repo scope to it.
-  const top = git(root, ['rev-parse', '--show-toplevel']).trim();
-  const sub = path.relative(top, root).split(path.sep).join('/');
+  const top = fs.realpathSync(git(root, ['rev-parse', '--show-toplevel']).trim());
+  const sub = path.relative(top, fs.realpathSync(root)).split(path.sep).join('/');
   if (sub && !sub.startsWith('..')) {
-    if (opts.scope === 'repo' && !opts.paths.length) opts.paths.push(sub);
+    // Paths after -- are relative to the directory given, like the rest of the command line.
+    opts.paths = opts.paths.length ? opts.paths.map((p) => path.posix.join(sub, p)) : opts.scope === 'repo' ? [sub] : [];
     root = top;
   }
   if (opts.scope === 'diff' && opts.paths.length) {

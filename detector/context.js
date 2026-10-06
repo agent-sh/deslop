@@ -42,10 +42,10 @@ function buildContext(root, opts) {
     ctx.commits = [];
     if (opts.commitText !== false) {
       // One record per commit: sha, message, and the files that commit changed.
-      const log = git(root, ['-c', 'core.quotepath=off', 'log', '--no-merges', '--format=%x1e%H%x1f%B%x1f', '--name-only', `${mb}..${ctx.head || 'HEAD'}`], { allowFail: true });
+      const log = git(root, ['log', '--no-merges', '--format=%x1e%H%x1f%B', `${mb}..${ctx.head || 'HEAD'}`], { allowFail: true });
       for (const rec of log.split('\x1e').slice(1)) {
-        const [sha, message, files] = rec.split('\x1f');
-        ctx.commits.push({ sha, message: (message || '').trim(), files: (files || '').split('\n').filter(Boolean) });
+        const [sha, message] = rec.split('\x1f');
+        ctx.commits.push({ sha, message: (message || '').trim() });
       }
     }
     if (!ctx.head) {

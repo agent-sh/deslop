@@ -115,6 +115,76 @@ describe('stale mentions', () => {
   });
 });
 
+describe('second review round', () => {
+  test('a binary file with a tab in its name can be deleted without a crash', () => {
+    const root = repo({ 'docs/arch\tv2.png': Buffer.from([0x89, 0x50, 0, 1]), 'README.md': '# x\n' }, { 'docs/arch\tv2.png': null });
+    expect(() => detect(root)).not.toThrow();
+  });
+
+  test('a docstring-only commit stays docs-only after a later commit shifts the file', () => {
+    const root = repo({ 'a.py': 'def f():\n    \"\"\"Doc.\"\"\"\n    return 1\n' }, {}, { commit: false });
+    const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'pipe' });
+    write(root, { 'a.py': 'def f():\n    \"\"\"Doc.\n\n    More words.\n    \"\"\"\n    return 1\n' });
+    git('commit', '-q', '-am', 'docs-only: expand f docstring');
+    write(root, { 'a.py': 'import os\nimport sys\nimport re\n\ndef f():\n    \"\"\"Doc.\n\n    More words.\n    \"\"\"\n    return 1\n' });
+    git('commit', '-q', '-am', 'feat: imports');
+    expect(detect(root).some((i) => i.check === 'scope-claim')).toBe(false);
+  });
+
+  test('a claim in a commit body bullet is not a claim about the commit; two real claims both show', () => {
+    const body = repo({ 'a.js': 'const x = 1;\n' }, { 'a.js': 'const x = 2;\n' }, { message: 'feat: move x\n\n- Test-only helpers stay in tests/helpers.js.' });
+    expect(detect(body).some((i) => i.check === 'scope-claim')).toBe(false);
+    const two = repo({ 'a.js': 'const x = 1;\n', 'b.js': 'const y = 1;\n' }, { 'a.js': 'const x = 2;\n' }, { message: 'docs-only: a' });
+    write(two, { 'b.js': 'const y = 2;\n' });
+    execFileSync('git', ['-C', two, 'commit', '-q', '-am', 'docs-only: b']);
+    expect(detect(two).filter((i) => i.check === 'scope-claim')).toHaveLength(2);
+  });
+
+  test('a major version bump finds the install line; a dependency range in another manifest is fine', () => {
+    const root = repo(
+      { 'package.json': '{\n  "name": "toolkit",\n  "version": "1.3.0"\n}\n', 'README.md': 'npm i toolkit@1.3.0\n', 'apps/web/package.json': '{\n  "dependencies": { "toolkit": "^1.3.0" }\n}\n' },
+      { 'package.json': '{\n  "name": "toolkit",\n  "version": "2.0.0"\n}\n' },
+    );
+    const files = detect(root).filter((i) => i.check === 'stale-mention').map((i) => i.file);
+    expect(files).toEqual(['README.md']);
+  });
+
+  test('a top-level directory deleted with git rm -r is still cited with its slash', () => {
+    const root = repo({ 'runners/a.sh': '#!/bin/sh\n', 'README.md': 'Runners live in runners/.\n' }, { 'runners/a.sh': null });
+    expect(detect(root).some((i) => i.check === 'stale-mention' && i.token === 'runners/')).toBe(true);
+  });
+
+  test('a byte order mark and an Nx comment are not broken JSON', () => {
+    const root = repo({ 'README.md': 'x\n' }, { 'tsconfig.json': '\uFEFF{ "compilerOptions": {} }\n', 'apps/x/project.json': '{\n  // targets\n  "name": "x"\n}\n' });
+    expect(detect(root).filter((i) => i.check === 'broken-file')).toEqual([]);
+  });
+
+  test('a shell test whose only guarded line is unrelated still cannot fail', () => {
+    const root = repo({ 'README.md': 'x\n' }, {
+      'tests/a.sh': '#!/bin/sh\ncommand -v jq >/dev/null && echo "jq OK"\nrun_thing 2>/dev/null; echo PASS\n',
+      'tests/b.sh': '#!/bin/sh\nrun_thing && echo PASS || echo FAIL\n',
+    });
+    const files = detect(root).filter((i) => i.check === 'test-cannot-fail').map((i) => i.file).sort();
+    expect(files).toEqual(['tests/a.sh', 'tests/b.sh']);
+  });
+
+  test('"(round 2)" is review history; "each review round re-runs" is not', () => {
+    const root = repo({ 'a.js': '1;\n', 'b.js': '2;\n' }, { 'a.js': '// fixed the retry (round 2)\n1;\n', 'b.js': '// Each review round re-runs the linter\n2;\n' });
+    expect(detect(root).filter((i) => i.check === 'review-provenance').map((i) => i.file)).toEqual(['a.js']);
+  });
+
+  test('camelCase record files are data; a symlinked subdirectory runs from the top level', () => {
+    const root = repo({ 'pkg/docs/a.md': '# a\n', 'pkg/src/a.js': '1\n' }, { 'pkg/docs/a.md': '# a\n\nSee [a](../src/a.js).\n', 'out/testResults.json': '{"broken": }\n' });
+    const link = `${root}-link`;
+    fs.symlinkSync(root, link);
+    roots.push(link);
+    const r = spawnSync('node', [DETECT, path.join(link, 'pkg'), '--base=main', '--json'], { encoding: 'utf8' });
+    const checks = JSON.parse(r.stdout).items.map((i) => i.check);
+    expect(checks).not.toContain('missing-path');
+    expect(checks).not.toContain('broken-file');
+  });
+});
+
 describe('references', () => {
   test('a doc cites a path that does not exist, but not an example or a glob', () => {
     const root = repo(

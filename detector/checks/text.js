@@ -3,13 +3,13 @@
 // em dashes where the house style bans them, lines written twice, doc comments split from
 // their item, and PR text whose scope claims contradict the diff.
 const { lang, commentOf, kind, SKIP_KINDS, TEXT_KINDS } = require('../files');
-const { git } = require('../git');
+const { git, BlobReader } = require('../git');
 const { parseDiff } = require('../diff');
 
 const CONFLICT = /^(<{7}(\s|$)|>{7}(\s|$)|\|{7}(\s|$)|={7}$)/;
 // History-shaped phrases only: review tooling describes its own job with "code review" and
 // "review findings", which is not provenance.
-const PROVENANCE = /\b(revuto|bugbot|coderabbit|copilot review|self-review|review rounds?(?: \d+)?|round \d+ (?:of )?review|\(round \d+\)|per (?:the )?review|addressed (?:the )?(?:review|feedback)|as (?:requested|suggested) (?:by|in) (?:the )?review|(?:the )?reviewer (?:asked|wanted|flagged|found|noted|pointed out))\b/i;
+const PROVENANCE = /\b(?:revuto|bugbot|coderabbit|copilot review|self-review|review rounds? (?:\d+|on|in)|round \d+ (?:of )?review|per (?:the )?review|addressed (?:the )?(?:review|feedback)|as (?:requested|suggested) (?:by|in) (?:the )?review|(?:the )?reviewer (?:asked|wanted|flagged|found|noted|pointed out))\b|\(round \d+\)/i;
 const EM_DASH = /—/;
 const DOC_LINE = { rust: /^\s*\/\/[/!]/, js: /^\s*(\*\/|\/\*\*|\*\s|\*$)/, py: null, go: /^\s*\/\//, c: /^\s*(\/\/\/|\*\/|\*\s)/, hash: /^\s*#(?!!)/, sh: /^\s*#(?!!)/ };
 const ITEM_START = { rust: /^\s*(pub(\([^)]*\))?\s+)?(async\s+|unsafe\s+|const\s+)*(fn|struct|enum|trait|impl|type|mod|const|static)\b|^\s*#\[/, js: /^\s*(export\s+)?(async\s+)?(function|class|const|let|interface|type)\b/, go: /^(func|type|var|const)\b/, c: /^\s*(class|struct|enum|template|static|inline|void|int|bool|auto)\b/, hash: /^\s{0,4}[A-Za-z0-9_-]+:\s*$|^\[[^\]]+\]$/, sh: /^\s*(function\s+)?[A-Za-z_][\w-]*\s*\(\)/ };
@@ -25,13 +25,13 @@ function stripBots(t) {
 }
 
 // True when every changed line of a code file is a comment, a docstring line or blank.
-function commentOnly(ctx, f) {
+function commentOnly(ctx, f, linesOf = ctx.lines) {
   const l = lang(f.path);
   if (!l) return false;
   const doc = new Set();
   if (l === 'py') {
     let inDoc = false;
-    (ctx.lines(f.path) || []).forEach((ln, i) => {
+    (linesOf(f.path) || []).forEach((ln, i) => {
       const n = (ln.match(/"{3}|'{3}/g) || []).length;
       if (inDoc || n) doc.add(i + 1);
       if (n % 2 === 1) inDoc = !inDoc;
@@ -111,13 +111,17 @@ module.exports = {
       // The PR body speaks for the whole branch; a commit message only for its own commit.
       const sources = [{ text: prText, code: codeFiles, tests: testFiles, who: 'the diff' }];
       for (const c of ctx.commits || []) {
-        // Judge a commit by its own hunks: a comment-only commit on a file another commit
-        // rewrote is still comment-only. Only commits that make a claim need their diff.
-        if (!SCOPE_CLAIM.test(c.message)) continue;
+        // The subject speaks for the commit; body bullets describe parts of it. Judge the
+        // commit by its own hunks, read at that commit: a comment-only commit on a file
+        // another commit rewrote is still comment-only.
+        const subject = c.message.split('\n')[0];
+        if (!SCOPE_CLAIM.test(subject)) continue;
+        const atCommit = new BlobReader(ctx.root, c.sha);
+        const linesAt = (p) => { const t = atCommit.read(p); return t === null ? null : t.split('\n'); };
         const own = parseDiff(git(ctx.root, ['-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--unified=0', '-M', `${c.sha}^`, c.sha], { allowFail: true }))
           .filter((f) => !f.binary)
           .map((f) => ({ ...f, kind: kind(f.path) }));
-        sources.push({ text: c.message, code: own.filter((f) => f.kind === 'code' && !commentOnly(ctx, f)), tests: own.filter((f) => f.kind === 'test'), who: `commit ${c.sha.slice(0, 7)}` });
+        sources.push({ text: subject, code: own.filter((f) => f.kind === 'code' && !commentOnly(ctx, f, linesAt)), tests: own.filter((f) => f.kind === 'test'), who: `commit ${c.sha.slice(0, 7)}` });
       }
       for (const src of sources) {
         for (const line of src.text.split('\n')) {
@@ -130,7 +134,7 @@ module.exports = {
           const claim = m[1].toLowerCase();
           const offending = /test/.test(claim) ? src.code : [...src.code, ...src.tests];
           if (!offending.length) continue;
-          push({ check: 'scope-claim', severity: 'high', file: '(PR text)', line: 0, excerpt: line.trim().slice(0, 160), message: `says "${m[1]}" but ${src.who} changes ${offending.length} code file(s), e.g. ${offending[0].path}` });
+          push({ check: 'scope-claim', severity: 'high', file: '(PR text)', line: 0, token: `${src.who}: ${line.trim().slice(0, 60)}`, excerpt: line.trim().slice(0, 160), message: `says "${m[1]}" but ${src.who} changes ${offending.length} code file(s), e.g. ${offending[0].path}` });
         }
       }
       for (const line of claimText.split('\n')) {

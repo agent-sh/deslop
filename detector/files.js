@@ -20,7 +20,8 @@ function kind(p) {
   if (LOCK.test(p)) return 'lock';
   if (VENDOR.test(p)) return 'vendor';
   if (CHANGELOG.test(p)) return 'changelog';
-  if (DATA.test(p) || DATA_UPPER.test(p)) return 'data';
+  // testResults.json reads as test-results.json.
+  if (DATA.test(p.replace(/([a-z])([A-Z])/g, '$1-$2')) || DATA_UPPER.test(p)) return 'data';
   if (CI.test(p)) return 'ci';
   if (PROMPT.test(p)) return 'prompt';
   if (TEST.test(p)) return 'test';
