@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { detect, formatText } = require('../detector');
-const { isRepo, git } = require('../detector/git');
+const { isRepo, git, isSymlink } = require('../detector/git');
 
 const HELP = `Usage: detect.js [repo] [options] [-- paths...]
 
@@ -77,7 +77,9 @@ function main(argv) {
     console.error('[WARN] paths are ignored in diff scope; use --scope=repo -- <paths> to scan files');
   }
   const cfgPath = path.join(root, '.deslop.json');
-  if (fs.existsSync(cfgPath)) {
+  if (isSymlink(root, '.deslop.json')) {
+    opts.skipped = ['symlink: .deslop.json not scanned'];
+  } else if (fs.existsSync(cfgPath)) {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     opts.ignore = cfg.ignore || [];
     opts.disable = cfg.disable || [];

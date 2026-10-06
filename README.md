@@ -74,10 +74,10 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 
 1. `--cmd='["codex", "exec", "-p", "luna", "{prompt}"]'`: the command as a JSON array of strings, run without a shell. An element that is exactly `{prompt}` becomes the prompt; with none, the prompt goes to stdin.
 2. `DESLOP_SMALL_CMD`: the same JSON array, from the environment.
-3. The `small` role in [gishra](https://github.com/agent-sh/gishra)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
+3. The `ladder.small` rung in [Tower Crane](https://github.com/agent-sh/tower-crane)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
 
 ```json
-{ "roles": { "small": { "harness": "codex", "profile": "luna" } } }
+{ "harness": "codex", "ladder": { "small": { "profile": "luna", "effort": "low" } } }
 ```
 
 | harness | command |
@@ -89,11 +89,11 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 | `pi` | `pi -p <prompt> --model <model> --provider <provider> --thinking <effort>` |
 | `command` | the `command` array, with an element `{prompt}` replaced by the prompt (or the prompt on stdin) |
 
-Options missing from the role are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
+The rung inherits the project's `harness` unless it names its own. Each rung comes from the project, then `GISHRA_CONFIG` (else `~/.config/gishra/config.json`), then the built-in Codex Luna rung. A configured rung that lacks the model, profile or command its harness needs, names an unsupported harness, or has fields that harness does not use is refused. Legacy `roles` files are refused; use `ladder`. Optional fields are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
 
 With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
 
-`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a git, ripgrep or linter run that could not start, timed out, was killed or exited with an unexpected status, is carried into the result as `detectorErrors`, so a failed scan never reads as clean. What a check could not cover, such as a language whose linter is not installed, is carried as `skipped`.
+`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a git, ripgrep or linter run that could not start, timed out, was killed or exited with an unexpected status, is carried into the result as `detectorErrors`, so a failed scan never reads as clean. What a check could not cover, such as a language whose linter is not installed or a symlinked path, is carried as `skipped`. Symlinked paths are excluded before every check, including agnix, and link targets are never read, even inside the repository.
 
 ## Configuration
 
@@ -115,7 +115,7 @@ With no model configured, `confirm.js` prints the findings ready to judge and ex
 - [ripgrep](https://github.com/BurntSushi/ripgrep) recommended: on large repositories it is the difference between seconds and minutes
 - shellcheck, ruff and actionlint are used when installed
 - [agnix](https://github.com/agent-sh/agnix) is used for `agent-config` when installed
-- a small model for the confirm step (optional): a gishra `small` role, `DESLOP_SMALL_CMD` or `--cmd`
+- a small model for the confirm step (optional): a Tower Crane `ladder.small` rung, `DESLOP_SMALL_CMD` or `--cmd`
 
 ## Related plugins
 

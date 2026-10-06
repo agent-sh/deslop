@@ -20,8 +20,7 @@ function detect(root, opts) {
   let items = [];
   const errors = [];
   // What a check could not cover, such as a language whose linter is not installed.
-  const skipped = [];
-  ctx.skip = (what) => skipped.push(what);
+  const skipped = ctx.skipped;
   for (const c of CHECKS) {
     if (!c.scopes.includes(ctx.scope) || disabled.has(c.id)) continue;
     try {

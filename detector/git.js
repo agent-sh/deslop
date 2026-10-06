@@ -33,10 +33,34 @@ function mergeBase(root, a, b) {
   return git(root, ['merge-base', a, b || 'HEAD'], { ok: [0, 1] }).trim() || null;
 }
 
-// Tracked paths at rev (or the index when rev is null).
-function listFiles(root, rev) {
-  const out = rev ? git(root, ['ls-tree', '-r', '--name-only', '-z', rev]) : git(root, ['ls-files', '-z']);
-  return out.split('\0').filter(Boolean);
+// Refuse links by their mode, without resolving or reading their targets. Disk checks also
+// catch a regular tracked file replaced with a link, and links in parent directories.
+function isSymlink(root, p) {
+  const file = path.resolve(root, p);
+  if (!file.startsWith(root + path.sep)) return false;
+  let at = root;
+  for (const part of path.relative(root, file).split(path.sep)) {
+    at = path.join(at, part);
+    try { if (fs.lstatSync(at).isSymbolicLink()) return true; }
+    catch (e) {
+      if (['ENOENT', 'ENOTDIR'].includes(e.code)) return false;
+      throw e;
+    }
+  }
+  return false;
+}
+
+// Regular tracked paths at rev (or the index). A skipped link is never passed to a check.
+function listFiles(root, rev, skip = () => {}) {
+  const out = rev ? git(root, ['ls-tree', '-r', '-z', rev]) : git(root, ['ls-files', '--stage', '-z']);
+  const files = new Set();
+  for (const rec of out.split('\0').filter(Boolean)) {
+    const tab = rec.indexOf('\t');
+    const p = rec.slice(tab + 1);
+    if (rec.startsWith('120000 ') || ((!rev || rev === 'HEAD') && isSymlink(root, p))) skip(p);
+    else files.add(p);
+  }
+  return [...files];
 }
 
 // Missing paths and symlinks (including a symlinked parent) read as null. Detector evidence
@@ -45,7 +69,7 @@ function readDisk(root, p, read) {
   const file = path.resolve(root, p);
   if (!file.startsWith(root + path.sep)) return null;
   try {
-    if (fs.realpathSync(file) !== file) return null;
+    if (isSymlink(root, p)) return null;
     return read(file);
   } catch (e) {
     if (['ENOENT', 'ENOTDIR', 'EISDIR', 'ELOOP'].includes(e.code)) return null;
@@ -60,6 +84,8 @@ class BlobReader {
     this.root = fs.realpathSync(root);
     this.rev = rev;
     this.cache = new Map();
+    // A revision's symlink blob contains its target path, not source text.
+    listFiles(this.root, rev, (p) => this.cache.set(p, null));
   }
   read(p) {
     return this.readMany([p])[0];
@@ -94,8 +120,10 @@ class BlobReader {
   sizes(paths) {
     if (!paths.length) return [];
     if (this.rev) {
-      const lines = git(this.root, ['cat-file', '--batch-check=%(objectsize)'], { input: paths.map((p) => `${this.rev}:${p}`).join('\n') + '\n' }).split('\n');
-      return paths.map((_, i) => (/^\d+$/.test(lines[i] || '') ? Number(lines[i]) : null));
+      const wanted = paths.filter((p) => this.cache.get(p) !== null);
+      const lines = wanted.length ? git(this.root, ['cat-file', '--batch-check=%(objectsize)'], { input: wanted.map((p) => `${this.rev}:${p}`).join('\n') + '\n' }).split('\n') : [];
+      const sizes = new Map(wanted.map((p, i) => [p, /^\d+$/.test(lines[i] || '') ? Number(lines[i]) : null]));
+      return paths.map((p) => sizes.get(p) ?? null);
     }
     return paths.map((p) => {
       const st = readDisk(this.root, p, fs.statSync);
@@ -122,7 +150,7 @@ function haveRg() {
 // rg's exit 2 (a file it could not read) means the search is incomplete, so run() throws.
 // No per-file match cap: it counts lines across all tokens, so common tokens would hide the
 // one line that mentions a rare one.
-function search(root, rev, tokens, { list, pathspecs = [], tracked, untracked = false }) {
+function search(root, rev, tokens, { list, pathspecs = [], tracked, untracked = false, symlinks = [] }) {
   const input = tokens.join('\n') + '\n';
   let out;
   let rg = false;
@@ -130,6 +158,7 @@ function search(root, rev, tokens, { list, pathspecs = [], tracked, untracked = 
     const args = [list ? '-l' : '-n', '--null', '--no-config', '-F', '--hidden', '--path-separator', '/', '-f', '-', '-g', '!.git'];
     if (!list) args.push('--no-heading', '--with-filename', '-M', '4000');
     for (const g of EXCLUDE_GLOBS) args.push('-g', `!${g}`);
+    for (const p of symlinks) args.push('-g', `!${p}`);
     args.push('.');
     out = run('rg', args, { cwd: root, input, ok: [0, 1] }).stdout;
     rg = true;
@@ -137,7 +166,7 @@ function search(root, rev, tokens, { list, pathspecs = [], tracked, untracked = 
     const args = ['grep', list ? '-l' : '-n', '-I', '--no-color', '-F', '-z', '--full-name', '-f', '-'];
     if (rev) args.push(rev);
     else if (untracked) args.push('--untracked');
-    args.push('--', ...(pathspecs.length ? pathspecs : ['.']), ...EXCLUDE);
+    args.push('--', ...(pathspecs.length ? pathspecs : ['.']), ...EXCLUDE, ...symlinks.map((p) => `:(exclude,literal)${p}`));
     out = git(root, args, { input, ok: [0, 1], timeout: SLOW_SEARCH_MS });
   }
   const clean = (f) => {
@@ -146,7 +175,7 @@ function search(root, rev, tokens, { list, pathspecs = [], tracked, untracked = 
     return f;
   };
   // rg searches the work tree, which can hold files git does not track.
-  const keep = (f) => !rg || !tracked || tracked.has(f);
+  const keep = (f) => !tracked || tracked.has(f);
   if (list) return out.split('\0').filter(Boolean).map(clean).filter(keep);
   const hits = [];
   // "<file>\0<line>:<text>" from rg, "<file>\0<line>\0<text>" from git grep -z.
@@ -175,4 +204,4 @@ function filesWithAny(root, rev, tokens, opts = {}) {
   return tokens.length ? search(root, rev, tokens, { ...opts, pathspecs: [], list: true }) : [];
 }
 
-module.exports = { git, isRepo, defaultBase, mergeBase, listFiles, BlobReader, grepMany, filesWithAny };
+module.exports = { git, isRepo, defaultBase, mergeBase, listFiles, isSymlink, BlobReader, grepMany, filesWithAny };

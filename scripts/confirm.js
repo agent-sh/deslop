@@ -4,6 +4,7 @@
 // which are real, and gives mechanical fixes. See --help.
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawnSync } = require('child_process');
 
 const HELP = `Usage: confirm.js [--input=FILE] [--repo=DIR] [--cmd=JSON] [--mode=report|apply] [--dry-run] [--timeout=SECONDS]
@@ -17,9 +18,9 @@ The model command is the first of:
                          that is exactly "{prompt}" becomes the prompt, otherwise the prompt is on
                          stdin. Example: --cmd='["codex", "exec", "-p", "luna", "{prompt}"]'
   DESLOP_SMALL_CMD       the same, from the environment
-  the gishra "small" role in $GISHRA_STATE/project.json, or .gishra/project.json at the root of
+  the Tower Crane ladder.small rung in $GISHRA_STATE/project.json, or .gishra/project.json at the root of
                          the main checkout; harness claude, codex, opencode, agy, pi or command,
-                         with optional model, profile, provider, effort and args
+                         inheriting the project's default harness when omitted
 
 The input must hold every finding the detector made (detect.js --json prints them all). Check
 failures the detector recorded are passed on in "detectorErrors".
@@ -31,7 +32,7 @@ every finding comes back unconfirmed with an "error" field.
   --repo=DIR     repository the findings point into (default: current directory)
   --dry-run      print the model command that would run, as JSON, and exit
   --timeout=S    seconds to wait for the model (default 600)
-Exit status: 0 when a result or the judge-it-yourself list was printed, 1 on a usage or input error.`;
+Exit status: 0 when a result or the judge-it-yourself list was printed, 1 on a usage, configuration or input error.`;
 
 const ACTIONS = new Set(['remove-line', 'replace', 'insert-after', 'insert-before']);
 // What to read before calling a finding real, per check.
@@ -78,7 +79,16 @@ function parseArgs(argv) {
 
 // --- the model command --------------------------------------------------------------------
 
-function gishraRole(repo) {
+function readLadder(file) {
+  const config = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error(`${file}: small rung configuration must be an object`);
+  if (config.roles !== undefined) throw new Error(`${file}: replace roles with harness and ladder.small`);
+  if (Object.hasOwn(config, 'harness') && (typeof config.harness !== 'string' || !config.harness.trim())) throw new Error(`${file}: small rung default harness must be a non-empty string`);
+  if (Object.hasOwn(config, 'ladder') && (!config.ladder || typeof config.ladder !== 'object' || Array.isArray(config.ladder))) throw new Error(`${file}: ladder must be an object`);
+  return config;
+}
+
+function smallRung(repo) {
   let dir = process.env.GISHRA_STATE;
   if (!dir) {
     const r = spawnSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
@@ -86,13 +96,41 @@ function gishraRole(repo) {
     dir = path.join(path.dirname(r.stdout.trim()), '.gishra');
   }
   const file = path.join(dir, 'project.json');
-  if (!fs.existsSync(file)) return null;
-  const project = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const role = project.roles && project.roles.small;
-  return role ? { role, file } : null;
+  if (!fs.existsSync(file)) {
+    if (process.env.GISHRA_STATE) throw new Error(`small rung: configured state has no ${file}`);
+    return null;
+  }
+  const project = readLadder(file);
+  const userFile = process.env.GISHRA_CONFIG || path.join(os.homedir(), '.config', 'gishra', 'config.json');
+  const user = fs.existsSync(userFile) ? readLadder(userFile) : {};
+  // Each rung is taken whole from the first layer that defines it, as in Tower Crane.
+  const hasSmall = (config) => config.ladder && Object.hasOwn(config.ladder, 'small');
+  const rung = hasSmall(project) ? project.ladder.small : hasSmall(user) ? user.ladder.small : { profile: 'luna', effort: 'low' };
+  if (!rung || typeof rung !== 'object' || Array.isArray(rung)) throw new Error(`${file}: ladder.small must be an object`);
+  const role = { ...rung, harness: Object.hasOwn(rung, 'harness') ? rung.harness : project.harness ?? user.harness ?? 'codex' };
+  const allowed = {
+    codex: ['model', 'profile', 'effort'],
+    claude: ['model', 'effort'],
+    opencode: ['model', 'effort'],
+    agy: ['model', 'effort'],
+    pi: ['model', 'provider', 'effort'],
+    command: ['command'],
+  }[role.harness];
+  if (!Array.isArray(allowed)) throw new Error(`small rung: unsupported harness "${role.harness}"`);
+  for (const [key, value] of Object.entries(role)) {
+    if (!['harness', 'args', ...allowed].includes(key)) throw new Error(`small rung: ${key} is not used by ${role.harness}`);
+    if (key === 'args' || key === 'command') {
+      if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) throw new Error(`small rung: ${key} must be an array of strings`);
+    } else if (typeof value !== 'string' || !value.trim()) throw new Error(`small rung: ${key} must be a non-empty string`);
+  }
+  if (role.harness === 'codex' ? !(role.model || role.profile) : role.harness !== 'command' && !role.model) {
+    throw new Error(`small rung: ${role.harness} needs ${role.harness === 'codex' ? 'a model or profile' : 'a model'}`);
+  }
+  if (role.harness === 'command' && (!role.command || !role.command.length || !role.command[0].trim())) throw new Error('small rung: command needs a non-empty command array');
+  return { role, file };
 }
 
-// argv for a gishra role. The confirm step edits nothing, so no permission flags are passed.
+// argv for the small rung. The confirm step edits nothing, so no permission flags are passed.
 function roleArgv(role, prompt) {
   const extra = Array.isArray(role.args) ? role.args.map(String) : [];
   const opt = (flag, v) => (v ? [flag, String(v)] : []);
@@ -110,7 +148,7 @@ function roleArgv(role, prompt) {
     case 'command':
       return [...withPrompt(role.command, prompt, 'the command harness\'s "command"'), ...extra];
     default:
-      throw new Error(`unsupported harness "${role.harness}" for the small role`);
+      throw new Error(`unsupported harness "${role.harness}" for the small rung`);
   }
 }
 
@@ -137,7 +175,7 @@ function resolveModel(o, prompt) {
     const argv = withPrompt(command, prompt, where);
     return { label: command.join(' '), argv, stdin: !command.includes(PROMPT), from: where };
   }
-  const g = gishraRole(o.repo);
+  const g = smallRung(o.repo);
   if (!g) return null;
   const argv = roleArgv(g.role, prompt);
   const stdin = g.role.harness === 'command' && !g.role.command.includes(PROMPT);
@@ -373,13 +411,21 @@ function main(argv) {
   };
   if (!items.length) { console.log(JSON.stringify(result, null, 2)); return 0; }
   const parts = batches(items, o.repo);
-  const model = resolveModel(o, parts[0].prompt);
+  let model;
+  try { model = resolveModel(o, parts[0].prompt); }
+  catch (e) {
+    result.unconfirmed = items.map(brief);
+    result.error = e.message;
+    console.error(`[ERROR] ${e.message}`);
+    console.log(JSON.stringify(result, null, 2));
+    return 1;
+  }
   if (o.dryRun) {
     console.log(JSON.stringify({ ...(model ? { model: model.label, from: model.from, argv: model.argv, stdin: model.stdin, batches: parts.length } : { model: null }), ...coverage }, null, 2));
     return 0;
   }
   if (!model) {
-    console.log(`deslop-confirm: no small model configured (--cmd, DESLOP_SMALL_CMD or a gishra "small" role). Judge these ${items.length} findings yourself and build the DESLOP_RESULT block.\n`);
+    console.log(`deslop-confirm: no small model configured (--cmd, DESLOP_SMALL_CMD or Tower Crane ladder.small). Judge these ${items.length} findings yourself and build the DESLOP_RESULT block.\n`);
     if (result.detectorErrors) console.log(`The detector also failed in part; put these in "detectorErrors":\n${result.detectorErrors.map((e) => `- ${e}`).join('\n')}\n`);
     if (result.skipped) console.log(`The detector did not cover these checks; put these in "skipped":\n${result.skipped.map((s) => `- ${s}`).join('\n')}\n`);
     console.log(parts.map((p) => p.prompt).join('\n'));

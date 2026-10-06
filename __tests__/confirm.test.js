@@ -169,7 +169,7 @@ test.each(['tracked', 'untracked'])('the detector-to-model pipeline never disclo
   expect(detected.stdout).not.toContain(secret);
 });
 
-test.each(['fallback', 'empty', 'model', 'failed-model', 'dry-run', 'dry-run-no-model'])('coverage notices survive the %s output path', (mode) => {
+test.each(['fallback', 'empty', 'model', 'failed-model', 'dry-run', 'dry-run-no-model', 'invalid-config'])('coverage notices survive the %s output path', (mode) => {
   const root = workspace(files);
   const rep = {
     ...report,
@@ -180,9 +180,16 @@ test.each(['fallback', 'empty', 'model', 'failed-model', 'dry-run', 'dry-run-no-
   const args = [];
   if (['model', 'failed-model', 'dry-run'].includes(mode)) args.push(`--cmd=${fakeModel(root)}`);
   if (mode.startsWith('dry-run')) args.push('--dry-run');
+  const env = {};
+  if (mode === 'invalid-config') {
+    const state = path.join(root, 'state');
+    fs.mkdirSync(state);
+    fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ harness: 'codex', ladder: { small: {} } }));
+    env.GISHRA_STATE = state;
+  }
   const reply = mode === 'failed-model' ? 'invalid reply' : JSON.stringify({ confirmed: [1, 2], dismissed: [], fixes: [] });
-  const r = confirm(root, reply, args, {}, rep);
-  expect(r.status).toBe(0);
+  const r = confirm(root, reply, args, env, rep);
+  expect(r.status).toBe(mode === 'invalid-config' ? 1 : 0);
   if (mode === 'fallback') {
     expect(r.stdout).toContain('put these in "detectorErrors"');
     expect(r.stdout).toContain('put these in "skipped"');
@@ -195,12 +202,12 @@ test.each(['fallback', 'empty', 'model', 'failed-model', 'dry-run', 'dry-run-no-
   }
 });
 
-test('the gishra small role runs a command harness with the prompt substituted', () => {
+test('the Tower Crane small rung runs a command harness with the prompt substituted', () => {
   const root = workspace(files);
   const state = path.join(root, 'state');
   fs.mkdirSync(state);
   const model = JSON.parse(fakeModel(root));
-  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: { harness: 'command', command: [...model, '{prompt}'] } } }));
+  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, ladder: { small: { harness: 'command', command: [...model, '{prompt}'] } } }));
   const out = JSON.parse(confirm(root, JSON.stringify({ confirmed: [1, 2], dismissed: [], fixes: [] }), [], { GISHRA_STATE: state }).stdout);
   expect(out.error).toBeUndefined();
   expect(out.model).toBe('command');
@@ -215,13 +222,12 @@ describe('harness command shapes', () => {
     [{ harness: 'opencode', model: 'prov/m' }, ['opencode', 'run', 'PROMPT', '-m', 'prov/m']],
     [{ harness: 'agy', model: 'agy-m', effort: 'high', args: ['--print-timeout', '0'] }, ['agy', '-p', 'PROMPT', '--model', 'agy-m', '--effort', 'high', '--print-timeout', '0']],
     [{ harness: 'pi', model: 'pi-m', provider: 'openai', effort: 'medium' }, ['pi', '-p', 'PROMPT', '--model', 'pi-m', '--provider', 'openai', '--thinking', 'medium']],
-    [{ harness: 'pi' }, ['pi', '-p', 'PROMPT']],
   ];
   test.each(shapes)('%j', (role, expected) => {
     const root = workspace(files);
     const state = path.join(root, 'state');
     fs.mkdirSync(state);
-    fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: role } }));
+    fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, ladder: { small: role } }));
     const r = confirm(root, '', ['--dry-run'], { GISHRA_STATE: state });
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -289,7 +295,7 @@ describe('the model command is an argv array', () => {
     const root = workspace(hostileFiles);
     const state = path.join(root, 'state');
     fs.mkdirSync(state);
-    const role = (command) => fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: { harness: 'command', command } } }));
+    const role = (command) => fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, ladder: { small: { harness: 'command', command } } }));
     const m = argvModel(root);
     role(['node', m, '{prompt}']);
     const out = JSON.parse(confirm(root, '', [], { GISHRA_STATE: state, EXPECT_LINE: hostile }).stdout);
@@ -332,4 +338,103 @@ describe('prompt size', () => {
     expect(out.findings.map((f) => f.id)).toEqual([1, 2]);
     for (const b of fs.readFileSync(calls, 'utf8').trim().split('\n').map(Number)) expect(b).toBeLessThanOrEqual(96 * 1024);
   });
+});
+
+// Exercise the real agnix entry point, not a stand-in that hides its symlink traversal.
+test.each(['tracked', 'untracked'])('all checks skip %s agent-config symlinks before the model sees them', (tracking) => {
+  const root = workspace({ ...files, 'scripts/old.sh': '#!/bin/sh\n' });
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 't');
+  git('config', 'commit.gpgsign', 'false');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  git('checkout', '-q', '-b', 'feature');
+  fs.unlinkSync(path.join(root, 'scripts/old.sh'));
+  const secret = 'PRIVATE-SYMLINK-CONTENT';
+  const outside = workspace({ 'SKILL.md': `---\nname: ${secret}\ndescription: example\n---\nBody.\n` });
+  fs.mkdirSync(path.join(root, 'skills', 'leaked'), { recursive: true });
+  fs.symlinkSync(path.join(outside, 'SKILL.md'), path.join(root, 'skills', 'leaked', 'SKILL.md'));
+  // Internal links are refused too. A normal local file keeps the pipeline active.
+  fs.writeFileSync(path.join(root, 'docs', 'local.md'), 'Local repeated prose\nLocal repeated prose\n');
+  git('add', 'docs/local.md');
+  fs.symlinkSync(path.join(root, 'docs', 'local.md'), path.join(root, 'docs', 'internal.md'));
+  if (tracking === 'tracked') { git('add', '-A'); git('commit', '-q', '-m', 'links'); }
+  const scopes = [['diff', true], ['repo', true]];
+  if (tracking === 'tracked') scopes.push(['diff', false], ['repo', false]);
+  for (const [scope, worktree] of scopes) {
+    const detected = spawnSync('node', [DETECT, root, '--base=main', ...(worktree ? ['--worktree'] : []), `--scope=${scope}`, '--json'], { encoding: 'utf8' });
+    expect(detected.status).toBe(0);
+    const rep = JSON.parse(detected.stdout);
+    const r = confirm(root, '', [`--cmd=${JSON.stringify(['node', argvModel(root)])}`], { NOT_IN_PROMPT: secret }, rep);
+    expect(r.status).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.error).toBeUndefined();
+    expect(out.summary.confirmed).toBeGreaterThan(0);
+    expect(detected.stdout).not.toContain(secret);
+    expect(rep.items.some((it) => ['skills/leaked/SKILL.md', 'docs/internal.md'].includes(it.file))).toBe(false);
+    expect(rep.skipped).toEqual(expect.arrayContaining(['symlink: skills/leaked/SKILL.md not scanned', 'symlink: docs/internal.md not scanned']));
+    expect(out.skipped).toEqual(rep.skipped);
+  }
+});
+
+test.each(['claude', 'codex', 'opencode', 'agy', 'pi', 'command'])('ladder.small inherits the %s project harness and runs it', (harness) => {
+  const root = workspace(files);
+  const state = path.join(root, 'state');
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(state);
+  fs.mkdirSync(bin);
+  const standin = `#!${process.execPath}\nconst fs = require('fs');
+const prompt = process.argv.slice(2).find((a) => a.startsWith('You are confirming')) || fs.readFileSync(0, 'utf8');
+if (!prompt.includes('[1] stale-mention')) process.exit(3);
+process.stdout.write(JSON.stringify({confirmed:[1,2],dismissed:[],fixes:[]}));\n`;
+  fs.writeFileSync(path.join(bin, harness), standin, { mode: 0o755 });
+  const small = harness === 'command' ? { command: [path.join(bin, harness)] } : harness === 'codex' ? { profile: 'luna' } : { model: 'test-small' };
+  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ harness, ladder: { small } }));
+  const r = confirm(root, '', [], { GISHRA_STATE: state, PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+  expect(r.status).toBe(0);
+  const out = JSON.parse(r.stdout);
+  expect(out.error).toBeUndefined();
+  expect(out.findings.map((f) => f.id)).toEqual([1, 2]);
+});
+
+test.each([
+  { harness: 'codex', ladder: { small: {} } },
+  { harness: 'pi', ladder: { small: { profile: 'luna' } } },
+  { harness: 'claude', ladder: { small: { effort: 'low' } } },
+  { harness: 'command', ladder: { small: { command: [] } } },
+  { harness: 'unknown', ladder: { small: { model: 'm' } } },
+  { harness: null, ladder: { small: { model: 'm' } } },
+  { harness: 'codex', ladder: { small: { harness: null, profile: 'luna' } } },
+  { harness: 'codex', ladder: null },
+  { ladder: { small: null } },
+  { roles: { small: { harness: 'codex', profile: 'luna' } } },
+])('an unusable configured small rung fails loudly: %j', (project) => {
+  const root = workspace(files);
+  const state = path.join(root, 'state');
+  fs.mkdirSync(state);
+  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify(project));
+  const r = confirm(root, '', ['--dry-run'], { GISHRA_STATE: state });
+  expect(r.status).toBe(1);
+  expect(r.stderr).toMatch(/ladder|small rung/);
+  expect(r.stdout).not.toContain('Judge these');
+});
+
+test.each(['project', 'user', 'builtin'])('small rung resolution takes the %s layer as a whole', (layer) => {
+  const root = workspace(files);
+  const state = path.join(root, 'state');
+  fs.mkdirSync(state);
+  const userFile = path.join(root, 'user.json');
+  const project = layer === 'project'
+    ? { harness: 'claude', ladder: { small: { harness: 'codex', profile: 'project-small' } } }
+    : layer === 'user' ? { harness: 'pi' } : {};
+  const user = layer === 'builtin' ? {} : { harness: 'claude', ladder: { small: { model: 'user-small' } } };
+  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify(project));
+  fs.writeFileSync(userFile, JSON.stringify(user));
+  const r = confirm(root, '', ['--dry-run'], { GISHRA_STATE: state, GISHRA_CONFIG: userFile });
+  expect(r.status).toBe(0);
+  const out = JSON.parse(r.stdout);
+  expect(out.model).toBe(layer === 'project' ? 'codex:project-small' : layer === 'user' ? 'pi:user-small' : 'codex:luna');
+  if (layer === 'project') expect(out.argv).not.toContain('user-small');
 });

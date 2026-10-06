@@ -10,7 +10,7 @@ This repo is the deslop plugin: one cleanup pass over a change (leftovers curren
 - Non-trivial changes go through a PR, not a direct push to main. Run the git hooks; do not bypass them.
 - In prose use ` - ` (single dash with spaces), not ` -- `.
 - If a script fails, report the failure before doing the step by hand, so broken tooling gets fixed.
-- Models: the detector is software only. Confirming findings is a small model's job (the project's gishra `small` role, Codex Luna by default there), run by `scripts/confirm.js`; Claude agents inherit the session model.
+- Models: the detector is software only. Confirming findings is a small model's job (the project's Tower Crane small rung in the ladder, Codex Luna by default there), run by `scripts/confirm.js`; Claude agents inherit the session model.
 - Priorities, in order: plugin users' experience, automation that needs no babysitting, token efficiency, output quality, simplicity.
 
 ## Layout

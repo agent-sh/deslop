@@ -197,6 +197,40 @@ describe('second review round', () => {
     expect(reader.readMany(paths)).toEqual([null, null, null, null, null, 'ordinary file\n']);
     expect(reader.sizes(paths)).toEqual([null, null, null, null, null, Buffer.byteLength('ordinary file\n')]);
   });
+
+  test('revision readers and searches never treat a symlink blob as source', () => {
+    const { BlobReader } = require('../detector/git');
+    const root = repo({ 'README.md': 'ordinary file\n' }, {}, { commit: false });
+    fs.symlinkSync('README.md', path.join(root, 'link.md'));
+    execFileSync('git', ['-C', root, 'add', 'link.md']);
+    execFileSync('git', ['-C', root, 'commit', '-q', '-m', 'link']);
+    const sha = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const reader = new BlobReader(root, sha);
+    expect(reader.readMany(['link.md', 'README.md'])).toEqual([null, 'ordinary file\n']);
+    expect(reader.sizes(['link.md', 'README.md'])).toEqual([null, Buffer.byteLength('ordinary file\n')]);
+    for (const args of [['--scope=repo'], ['--scope=repo', `--head=${sha}`], ['--worktree']]) {
+      const r = spawnSync('node', [DETECT, root, '--base=main', '--json', ...args], { encoding: 'utf8', env: { ...process.env, DESLOP_NO_RG: '1' } });
+      expect(r.status).toBe(0);
+      const out = JSON.parse(r.stdout);
+      expect(out.items.some((it) => it.file === 'link.md')).toBe(false);
+      expect(out.skipped).toContain('symlink: link.md not scanned');
+    }
+  });
+
+  test('linked configuration and linked parents are skipped without reading outside contents', () => {
+    const root = repo({ 'skills/x/SKILL.md': '---\nname: good\ndescription: example\n---\nBody.\n' }, {}, { commit: false });
+    const outside = repo({ '.deslop.json': 'PRIVATE invalid JSON', 'SKILL.md': '---\nname: PRIVATE-OUTSIDE\ndescription: example\n---\nBody.\n' }, {}, { commit: false });
+    fs.symlinkSync(path.join(outside, '.deslop.json'), path.join(root, '.deslop.json'));
+    fs.rmSync(path.join(root, 'skills', 'x'), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, 'skills', 'x'));
+    const r = spawnSync('node', [DETECT, root, '--base=main', '--worktree', '--json'], { encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain('PRIVATE');
+    const out = JSON.parse(r.stdout);
+    expect(out.skipped).toEqual(expect.arrayContaining(['symlink: .deslop.json not scanned', 'symlink: skills/x/SKILL.md not scanned']));
+    expect(out.errors).toEqual([]);
+  });
+
 });
 
 describe('references', () => {
