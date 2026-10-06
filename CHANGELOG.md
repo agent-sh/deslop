@@ -2,13 +2,24 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-06
+
 ### Changed
 - `/deslop` description says what the command does (report by default, remove on request) before its trigger phrases, and the agent and AGENTS.md lost lines current models do not need. Same contract.
 - `.agnix.toml` no longer disables the six rules that existed only for the old generated AGENTS.md, so the lint covers the new one.
+- Breaking for direct callers of the `lib/` helpers: benchmark, profiling and custom CLI execution require a separate trusted host authorization callback. Plain command data and cached preferences cannot authorize a process. The callback approves the final immutable invocation for each launch. Callers pass `authorizeExecution` to the helpers; the migration list is in the README.
+- Generic tool availability checks accept only their original fixed command and flag pairs. Additional CLI probes use the callback-bound custom-source API.
+
+### Removed
+- Removed unused `lib/repo-map/` leftovers (cache, converter, installer, updater) and a stale `lib/binary/index.test.js`.
 
 ### Fixed
 - Windows batch-shim launches explicitly disable delayed expansion so literal exclamation
   marks in arguments remain intact even when the user's command processor enables it.
+- Mistaken asynchronous host policies that return native promises from another realm are denied without leaving normal rejected promises unhandled. Denied execution starts no command child and policy failures expose no private exception details.
+
+### Security
+- Dev dependency `jest` moved to 30 and the CI reusable workflows and actions are pinned to commit SHAs, clearing the open dependency and workflow alerts.
 
 ## [1.2.0] - 2026-09-24
 
