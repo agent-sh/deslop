@@ -8,7 +8,7 @@ locale = "en"
 
 disabled_rules = [
     "CC-SK-017",   # Intentional - version is a client-specific frontmatter field
-    "XP-003",      # Intentional - references/slop-categories.md uses example paths like /home/user/
+    "XP-003",      # Intentional - synced lib/cross-platform/RESEARCH.md documents per-tool config paths like ~/.codex/
     "XML-001",     # False positive - <path> is a placeholder in code examples, not unclosed XML
 ]
 

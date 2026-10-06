@@ -1,6 +1,6 @@
 # deslop
 
-This repo is the deslop plugin: AI slop cleanup with minimal diffs that preserve behavior. Part of the [agentsys](https://github.com/agent-sh/agentsys) ecosystem; skills follow https://agentskills.io.
+This repo is the deslop plugin: it checks a change for what current coding models leave behind (stale mentions, dead references, tests that cannot fail) and fixes what it confirms. Part of the [agentsys](https://github.com/agent-sh/agentsys) ecosystem; skills follow https://agentskills.io.
 
 ## Rules
 
@@ -16,11 +16,12 @@ This repo is the deslop plugin: AI slop cleanup with minimal diffs that preserve
 ## Layout
 
 - `commands/deslop.md`: the `/deslop` command (report or apply).
-- `agents/deslop-agent.md`: the read-only Sonnet scanner that returns the `DESLOP_RESULT` block.
-- `skills/deslop/SKILL.md`: detection, judgment and the output contract; repo-intel detail in `skills/deslop/references/repo-intel.md`.
-- `references/slop-categories.md`: pattern catalog and fix strategies per language.
-- `scripts/detect.js`: the detector CLI (`--help`).
-- `lib/` is synced from [agent-core](https://github.com/agent-sh/agent-core), including `lib/agentsys.js`, so change shared code there. These are local and edited here: `lib/repo-intel-signals.js`, `lib/utils/command-execution.js` and the nine host-authorization files listed in agent-core's [sync-exclude.json](https://github.com/agent-sh/agent-core/blob/main/sync-exclude.json) (`lib/patterns/cli-enhancers.js`, `lib/platform/verify-tools.js`, the benchmark, breaking-point, constraint, optimization and profiling runners in `lib/perf/`, `lib/sources/custom-handler.js` and `lib/sources/policy-questions.js`). The sync skips those nine.
+- `agents/deslop-agent.md`: the read-only Sonnet agent that runs the skill and returns the `DESLOP_RESULT` block.
+- `skills/deslop/SKILL.md`: the checks, how to confirm each, and the output contract.
+- `scripts/detect.js`: the detector CLI (`--help`); `detector/` holds its git access, diff parser and one file per check in `detector/checks/`.
+- `lib/` is synced from [agent-core](https://github.com/agent-sh/agent-core), including `lib/agentsys.js`, so change shared code there. The detector does not use it. These are local and edited here: `lib/utils/command-execution.js` and the nine host-authorization files listed in agent-core's [sync-exclude.json](https://github.com/agent-sh/agent-core/blob/main/sync-exclude.json) (`lib/patterns/cli-enhancers.js`, `lib/platform/verify-tools.js`, the benchmark, breaking-point, constraint, optimization and profiling runners in `lib/perf/`, `lib/sources/custom-handler.js` and `lib/sources/policy-questions.js`). The sync skips those nine.
+
+A new check needs a case in `__tests__/detect.test.js` that fails without it and a look-alike that must stay quiet. Precision matters more than coverage: a check that is wrong half the time costs every run the tokens to dismiss it.
 
 ## Checks
 

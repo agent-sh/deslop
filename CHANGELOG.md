@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Changed
+- Breaking: deslop now checks a change for what current coding models leave behind, not the debug prints and TODO stubs older models left. The detector (`scripts/detect.js`, `detector/`) is rewritten around git: leftover mentions of files, flags, env vars, functions and values the change removed or replaced; cited paths and heading anchors that do not exist; docs-only or test-only claims over code changes; review history in code comments; tests with no assertion; code inserted between a doc comment and its item; rules a doc or prompt rewrite dropped; unwired additions; conflict markers, secrets and machine-local paths; shellcheck, ruff and actionlint on added lines.
+- Default scope is the branch diff against its merge base. `--scope=repo` or a path scans tracked files without a diff. The PR body (`--pr-body`) and commit messages are checked against the diff.
+- The agent confirms each finding by reading the flagged line and returns only confirmed ones. `fixes` use `next-task:simple-fixer`'s actions (`remove-line`, `replace` with `old`/`new`, `insert-after`, `insert-before`), so next-task can apply them as they are.
+- Measured on 39 agent-written pull requests: 1.x reported 3,367 findings at 0.5% precision and caught none of the 106 defects reviewers found; 2.0 reports 57, of which 23 of 25 HIGH are real. On 48 held-out pull requests it reports 9, 3 of 4 HIGH real.
+- `missing-companion`: files the repository declares as changing together (`together` in `.deslop.json`), or that recent history almost always changes together, where the change edited one side only.
+
+### Removed
+- `--thoroughness`, the regex pattern catalog (`references/slop-categories.md`), the repo-intel integration (`lib/repo-intel-signals.js`, `skills/deslop/references/repo-intel.md`) and the jscpd, madge and escomplex runs.
+
 ## [1.3.0] - 2026-10-06
 
 ### Changed
