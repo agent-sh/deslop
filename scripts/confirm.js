@@ -1,0 +1,346 @@
+#!/usr/bin/env node
+'use strict';
+// deslop confirm step: a small model reads each detector finding with its context and says
+// which are real, and gives mechanical fixes. See --help.
+const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const HELP = `Usage: confirm.js [--input=FILE] [--repo=DIR] [--cmd=COMMAND] [--mode=report|apply] [--dry-run] [--timeout=SECONDS]
+
+Reads detector JSON (detect.js --json) from --input or stdin, asks a small model to confirm each
+finding, and prints the DESLOP_RESULT JSON: confirmed findings, dismissed ones with the reason,
+and fixes in simple-fixer form. Every fix is checked against the file before it is returned.
+
+The model command is the first of:
+  --cmd=COMMAND          a shell command; {prompt} in it becomes the prompt, otherwise the prompt is on stdin
+  DESLOP_SMALL_CMD       the same, from the environment
+  the gishra "small" role in $GISHRA_STATE/project.json, or .gishra/project.json at the root of
+                         the main checkout; harness claude, codex, opencode, agy, pi or command,
+                         with optional model, profile, provider, effort and args
+
+With no model configured it prints the findings ready to judge and exits 0, so the calling agent
+judges them itself. If the model fails or its reply is not valid, every finding comes back
+unconfirmed with an "error" field.
+
+  --repo=DIR     repository the findings point into (default: current directory)
+  --dry-run      print the model command that would run, as JSON, and exit
+  --timeout=S    seconds to wait for the model (default 600)
+Exit status: 0 when a result or the judge-it-yourself list was printed, 1 on a usage or input error.`;
+
+const ACTIONS = new Set(['remove-line', 'replace', 'insert-after', 'insert-before']);
+// What to read before calling a finding real, per check.
+const HINTS = {
+  'stale-mention': 'Real if the line describes the current state; a dated record or a "was removed" note is fine.',
+  'missing-path': 'Dismiss an example, another repo\'s path, or a file a sibling change adds.',
+  'broken-anchor': 'Real unless the target heading exists under another spelling.',
+  'scope-claim': 'Comment-only code edits do not break a docs-only claim.',
+  'review-provenance': 'Real: the comment should say why the code is this way, not which review asked.',
+  'test-cannot-fail': 'Dismiss when a helper the test calls asserts.',
+  'test-swallows-failure': 'Dismiss when the failure is checked another way.',
+  'no-caller': 'Dismiss entry points, framework hooks and public API used from outside.',
+  'unread-setting': 'Dismiss settings read by a tool outside the repo.',
+  'dropped-rule': 'Real only if dropping the rule or reason was not intended by the rewrite.',
+  'missing-companion': 'Real if the companion file describes or mirrors what changed.',
+  'changelog-missing': 'Real if users of the project would notice the change.',
+  'doc-example-stale': 'Real unless the flag or command exists under a name the detector missed.',
+  'version-mismatch': 'Real if both files describe the same package or plugin.',
+  'duplicate-code': 'Real if the two blocks do the same job and could share one helper; dismiss generated or intentionally mirrored copies.',
+  complexity: 'Real if the function would read better split; dismiss a flat table, a dispatcher or generated code.',
+  'agent-config': 'Real unless the rule does not apply to this harness or file.',
+  'em-dash': 'Real where the house style bans em dashes.',
+};
+
+function parseArgs(argv) {
+  const o = { mode: 'report', repo: process.cwd(), timeout: 600 };
+  for (const a of argv) {
+    if (a === '-h' || a === '--help') { o.help = true; continue; }
+    if (a === '--dry-run') { o.dryRun = true; continue; }
+    const m = /^--([a-z-]+)=(.*)$/s.exec(a);
+    if (!m) throw new Error(`unknown argument ${a}`);
+    const [, k, v] = m;
+    if (k === 'input') o.input = v;
+    else if (k === 'repo') o.repo = path.resolve(v);
+    else if (k === 'cmd') o.cmd = v;
+    else if (k === 'mode') o.mode = v;
+    else if (k === 'timeout') o.timeout = Number(v);
+    else throw new Error(`unknown option --${k}`);
+  }
+  if (!['report', 'apply'].includes(o.mode)) throw new Error('--mode is report or apply');
+  if (!(o.timeout > 0)) throw new Error('--timeout takes a number of seconds');
+  return o;
+}
+
+// --- the model command --------------------------------------------------------------------
+
+function gishraRole(repo) {
+  let dir = process.env.GISHRA_STATE;
+  if (!dir) {
+    const r = spawnSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
+    if (r.status !== 0) return null;
+    dir = path.join(path.dirname(r.stdout.trim()), '.gishra');
+  }
+  const file = path.join(dir, 'project.json');
+  if (!fs.existsSync(file)) return null;
+  const project = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const role = project.roles && project.roles.small;
+  return role ? { role, file } : null;
+}
+
+// argv for a gishra role. The confirm step edits nothing, so no permission flags are passed.
+function roleArgv(role, prompt) {
+  const extra = Array.isArray(role.args) ? role.args.map(String) : [];
+  const opt = (flag, v) => (v ? [flag, String(v)] : []);
+  switch (role.harness) {
+    case 'codex':
+      return ['codex', 'exec', ...(role.profile ? ['-p', role.profile] : opt('-m', role.model)), ...(role.effort ? ['-c', `model_reasoning_effort=${role.effort}`] : []), prompt, ...extra];
+    case 'claude':
+      return ['claude', '-p', prompt, ...opt('--model', role.model), ...opt('--effort', role.effort), ...extra];
+    case 'opencode':
+      return ['opencode', 'run', prompt, ...opt('-m', role.model), ...opt('--variant', role.effort), ...extra];
+    case 'agy':
+      return ['agy', '-p', prompt, ...opt('--model', role.model), ...opt('--effort', role.effort), ...extra];
+    case 'pi':
+      return ['pi', '-p', prompt, ...opt('--model', role.model), ...opt('--provider', role.provider), ...opt('--thinking', role.effort), ...extra];
+    case 'command': {
+      if (!Array.isArray(role.command) || !role.command.length) throw new Error('the command harness needs a "command" array');
+      return [...role.command.map((w) => String(w).split('{prompt}').join(prompt)), ...extra];
+    }
+    default:
+      throw new Error(`unsupported harness "${role.harness}" for the small role`);
+  }
+}
+
+// How to run the model: {label, argv, stdin} or null when nothing is configured.
+function resolveModel(o, prompt) {
+  const shell = o.cmd || process.env.DESLOP_SMALL_CMD;
+  if (shell) {
+    // The prompt reaches the shell through the environment, never spliced into the command text.
+    const uses = shell.includes('{prompt}');
+    return { label: shell, argv: ['sh', '-c', shell.split('{prompt}').join('"$DESLOP_PROMPT"')], stdin: !uses, env: { DESLOP_PROMPT: prompt }, from: o.cmd ? '--cmd' : 'DESLOP_SMALL_CMD' };
+  }
+  const g = gishraRole(o.repo);
+  if (!g) return null;
+  const argv = roleArgv(g.role, prompt);
+  const stdin = g.role.harness === 'command' && !g.role.command.some((w) => String(w).includes('{prompt}'));
+  const label = [g.role.harness, g.role.profile || g.role.model].filter(Boolean).join(':');
+  return { label, argv, stdin, env: {}, from: g.file };
+}
+
+// --- the prompt ---------------------------------------------------------------------------
+
+function context(repo, file, line, cache) {
+  if (!file || file === '(PR text)' || !line) return [];
+  if (!cache.has(file)) {
+    let lines = null;
+    try { lines = fs.readFileSync(path.join(repo, file), 'utf8').split('\n'); } catch { /* deleted or unreadable */ }
+    cache.set(file, lines);
+  }
+  const lines = cache.get(file);
+  if (!lines) return [];
+  const out = [];
+  for (let n = Math.max(1, line - 2); n <= Math.min(lines.length, line + 2); n++) {
+    out.push(`${n === line ? '>' : ' '} ${String(n).padStart(5)} | ${lines[n - 1].slice(0, 200)}`);
+  }
+  return out;
+}
+
+function describe(item, repo, cache) {
+  const out = [`[${item.id}] ${item.check} (${item.severity}) ${item.file}${item.line ? ':' + item.line : ''}`, `    ${item.message}`];
+  if (item.changed) {
+    const c = item.changed;
+    out.push(`    changed in ${c.file}${c.line ? ':' + c.line : ''}: - ${String(c.before || '').trim().slice(0, 160)}${c.after !== undefined ? ` / + ${String(c.after).trim().slice(0, 160)}` : ''}`);
+  }
+  if (item.fix && item.fix.fixType === 'replace-token') out.push(`    suggested: replace \`${item.fix.from}\` with \`${item.fix.to}\``);
+  if (item.fix && item.fix.fixType === 'remove-line') out.push('    suggested: remove the line');
+  if (HINTS[item.check]) out.push(`    read: ${HINTS[item.check]}`);
+  const ctx = context(repo, item.file, item.line, cache);
+  if (ctx.length) out.push(...ctx.map((l) => `    ${l}`));
+  else if (item.excerpt) out.push(`    > ${item.excerpt}`);
+  return out.join('\n');
+}
+
+const INSTRUCTIONS = `You are confirming findings from deslop, a detector for defects a code change leaves behind (text that was true before the change, references that resolve to nothing, copied code, functions grown too large). For each numbered finding, read the flagged line (marked >) and its context and decide whether it is a real defect after this change.
+
+- Real: put its number in "confirmed".
+- Not real (an example, a historical record, another repository's path, an intended choice): put {"id": number, "why": "one short reason"} in "dismissed".
+- For a confirmed finding that a mechanical edit of the flagged line fixes, add {"file", "line", "action", "old", "new", "reason"} to "fixes". action is "remove-line", "replace" ("old" is text on that line, "new" replaces it), "insert-after" or "insert-before" ("new" is the whole new line). Leave a fix out when you are not sure of the exact text.
+- Judge only these findings. Do not look for other problems and do not edit files.
+
+Reply with one JSON object and nothing else:
+{"confirmed": [1], "dismissed": [{"id": 2, "why": "..."}], "fixes": [{"file": "a.md", "line": 3, "action": "replace", "old": "x", "new": "y", "reason": "stale-mention"}]}`;
+
+// Argument strings over 128 KiB fail to exec on Linux; batches stay well under that.
+const BATCH_BYTES = 96 * 1024;
+
+function batches(items, repo) {
+  const cache = new Map();
+  const out = [];
+  let cur = [];
+  let size = 0;
+  for (const it of items) {
+    const text = describe(it, repo, cache);
+    if (cur.length && size + text.length > BATCH_BYTES) { out.push(cur); cur = []; size = 0; }
+    cur.push({ it, text });
+    size += text.length + 2;
+  }
+  if (cur.length) out.push(cur);
+  return out.map((b) => ({ ids: b.map((x) => x.it.id), prompt: `${INSTRUCTIONS}\n\nFindings:\n\n${b.map((x) => x.text).join('\n\n')}\n` }));
+}
+
+// --- the reply ----------------------------------------------------------------------------
+
+// The JSON object in a model reply: the whole reply, a fenced block, or the last balanced object.
+function extractJson(text) {
+  const t = String(text || '').trim();
+  try { return JSON.parse(t); } catch { /* look further */ }
+  const fence = /```(?:json)?\s*\n([\s\S]*?)\n```/g;
+  let m;
+  let last = null;
+  while ((m = fence.exec(t))) last = m[1];
+  if (last) { try { return JSON.parse(last); } catch { /* look further */ } }
+  for (let end = t.lastIndexOf('}'); end > 0; end = t.lastIndexOf('}', end - 1)) {
+    let depth = 0;
+    let inStr = false;
+    for (let i = end; i >= 0; i--) {
+      const c = t[i];
+      if (c === '"' && t[i - 1] !== '\\') inStr = !inStr;
+      if (inStr) continue;
+      if (c === '}') depth++;
+      if (c === '{' && --depth === 0) {
+        try { return JSON.parse(t.slice(i, end + 1)); } catch { break; }
+      }
+    }
+  }
+  throw new Error('no JSON object in the model reply');
+}
+
+const isId = (v) => (Number.isInteger(v) && v > 0) || (typeof v === 'string' && /^[1-9]\d*$/.test(v));
+
+// Strict shape check; throws on anything that is not the contract.
+function validate(reply, ids) {
+  if (!reply || typeof reply !== 'object' || Array.isArray(reply)) throw new Error('reply is not a JSON object');
+  for (const k of ['confirmed', 'dismissed', 'fixes']) if (!Array.isArray(reply[k])) throw new Error(`"${k}" is not an array`);
+  const known = new Set(ids);
+  const seen = new Set();
+  const take = (v, where) => {
+    if (!isId(v)) throw new Error(`${where}: ${JSON.stringify(v)} is not a finding number`);
+    const n = Number(v);
+    if (!known.has(n)) throw new Error(`${where}: there is no finding ${n}`);
+    if (seen.has(n)) throw new Error(`finding ${n} is judged twice`);
+    seen.add(n);
+    return n;
+  };
+  const confirmed = reply.confirmed.map((v) => take(v, 'confirmed'));
+  const dismissed = reply.dismissed.map((d) => {
+    if (!d || typeof d !== 'object' || typeof d.why !== 'string') throw new Error('dismissed entries are {"id", "why"}');
+    return { id: take(d.id, 'dismissed'), why: d.why };
+  });
+  for (const f of reply.fixes) {
+    if (!f || typeof f !== 'object' || typeof f.file !== 'string' || !Number.isInteger(f.line) || f.line < 1 || !ACTIONS.has(f.action)) {
+      throw new Error(`fix ${JSON.stringify(f).slice(0, 120)} needs file, a positive integer line and an action of ${[...ACTIONS].join(', ')}`);
+    }
+    if (f.action === 'replace' && (typeof f.old !== 'string' || !f.old || typeof f.new !== 'string')) throw new Error('a replace fix needs "old" and "new" strings');
+    if (f.action.startsWith('insert') && typeof f.new !== 'string') throw new Error('an insert fix needs a "new" string');
+  }
+  return { confirmed, dismissed, fixes: reply.fixes, unjudged: ids.filter((n) => !seen.has(n)) };
+}
+
+// A fix is kept only when it edits a confirmed finding's line and its old text is on that line.
+function checkFixes(fixes, confirmedItems, repo) {
+  const kept = [];
+  const rejected = [];
+  const lines = new Map();
+  for (const f of fixes) {
+    if (!confirmedItems.some((it) => it.file === f.file && it.line === f.line)) { rejected.push({ fix: f, why: 'not the line of a confirmed finding' }); continue; }
+    if (!lines.has(f.file)) {
+      let l = null;
+      try { l = fs.readFileSync(path.join(repo, f.file), 'utf8').split('\n'); } catch { /* unreadable */ }
+      lines.set(f.file, l);
+    }
+    const text = (lines.get(f.file) || [])[f.line - 1];
+    if (text === undefined) { rejected.push({ fix: f, why: 'line does not exist' }); continue; }
+    if ((f.action === 'replace' || (f.action === 'remove-line' && typeof f.old === 'string' && f.old)) && !text.includes(f.old)) { rejected.push({ fix: f, why: '"old" is not on that line' }); continue; }
+    const fix = { file: f.file, line: f.line, action: f.action };
+    if (typeof f.old === 'string') fix.old = f.old;
+    if (typeof f.new === 'string') fix.new = f.new;
+    fix.reason = typeof f.reason === 'string' && f.reason ? f.reason : confirmedItems.find((it) => it.file === f.file && it.line === f.line).check;
+    kept.push(fix);
+  }
+  return { kept, rejected };
+}
+
+function runModel(model, prompt, o) {
+  const [bin, ...args] = model.argv;
+  const r = spawnSync(bin, args, {
+    cwd: o.repo,
+    input: model.stdin ? prompt : '',
+    encoding: 'utf8',
+    env: { ...process.env, ...model.env },
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: o.timeout * 1000,
+  });
+  if (r.error) throw new Error(r.error.code === 'ETIMEDOUT' ? `model timed out after ${o.timeout}s` : `could not run the model: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`model exited ${r.status}: ${(r.stderr || '').trim().split('\n').slice(-3).join(' ').slice(0, 300)}`);
+  return r.stdout;
+}
+
+const brief = (it) => ({ id: it.id, file: it.file, line: it.line, check: it.check, severity: it.severity, message: it.message });
+
+function main(argv) {
+  const o = parseArgs(argv);
+  if (o.help) { console.log(HELP); return 0; }
+  const raw = o.input ? fs.readFileSync(o.input, 'utf8') : fs.readFileSync(0, 'utf8');
+  const report = JSON.parse(raw);
+  if (!report || !Array.isArray(report.items)) throw new Error('input is not detector JSON (no "items" array); run detect.js --json');
+  const items = report.items.map((it, i) => ({ ...it, id: i + 1 }));
+  const result = { mode: o.mode, scope: report.scope || 'diff', base: report.base, findings: [], fixes: [], dismissed: [], unconfirmed: [], summary: { reported: items.length, confirmed: 0, dismissed: 0, fixable: 0 } };
+  if (report.total > items.length) result.summary.notShown = report.total - items.length;
+  if (!items.length) { console.log(JSON.stringify(result, null, 2)); return 0; }
+  const parts = batches(items, o.repo);
+  const model = resolveModel(o, parts[0].prompt);
+  if (o.dryRun) {
+    console.log(JSON.stringify(model ? { model: model.label, from: model.from, argv: model.argv, stdin: model.stdin, batches: parts.length } : { model: null }, null, 2));
+    return 0;
+  }
+  if (!model) {
+    console.log(`deslop-confirm: no small model configured (--cmd, DESLOP_SMALL_CMD or a gishra "small" role). Judge these ${items.length} findings yourself and build the DESLOP_RESULT block.\n`);
+    console.log(parts.map((p) => p.prompt).join('\n'));
+    return 0;
+  }
+  result.model = model.label;
+  const byId = new Map(items.map((it) => [it.id, it]));
+  try {
+    const confirmed = [];
+    const fixes = [];
+    for (const part of parts) {
+      const m = resolveModel(o, part.prompt);
+      const v = validate(extractJson(runModel(m, part.prompt, o)), part.ids);
+      confirmed.push(...v.confirmed);
+      for (const d of v.dismissed) result.dismissed.push({ ...brief(byId.get(d.id)), why: d.why });
+      for (const n of v.unjudged) result.unconfirmed.push(brief(byId.get(n)));
+      fixes.push(...v.fixes);
+    }
+    result.findings = confirmed.map((n) => brief(byId.get(n)));
+    const { kept, rejected } = checkFixes(fixes, result.findings, o.repo);
+    result.fixes = kept;
+    if (rejected.length) result.rejectedFixes = rejected;
+  } catch (e) {
+    // Nothing from a bad reply is trusted: every finding goes back unjudged.
+    result.findings = [];
+    result.fixes = [];
+    result.dismissed = [];
+    result.unconfirmed = items.map(brief);
+    result.error = e.message;
+  }
+  result.summary = { ...result.summary, confirmed: result.findings.length, dismissed: result.dismissed.length, fixable: result.fixes.length };
+  console.log(JSON.stringify(result, null, 2));
+  return 0;
+}
+
+try {
+  process.exitCode = main(process.argv.slice(2));
+} catch (e) {
+  console.error(`[ERROR] ${e.message}`);
+  process.exitCode = 1;
+}

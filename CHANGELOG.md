@@ -2,10 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+- One cleanup pass instead of separate tools. New checks: `changelog-missing` (a user-visible change, such as a new flag, env var, command or `feat:` commit over code, with nothing under `Unreleased`), `doc-example-stale` (a docs example passing a flag the repo's own CLI or slash command does not define, or a slash command the change deleted), `version-mismatch` (a version moved in one manifest of a package and not in another, such as `.claude-plugin/plugin.json`, or a new docs line pinning another version), `duplicate-code` (added code that already exists elsewhere, found by token fingerprints), `complexity` (a function the change pushed past 80 lines, 5 levels of nesting or 6 parameters) and `agent-config` (agnix errors in agent files the change touched, when agnix is installed).
+- `scripts/confirm.js`: a small model confirms the detector's findings and returns fixes, each checked against the file. The model is `--cmd`, `DESLOP_SMALL_CMD`, or the gishra `small` role (`claude`, `codex`, `opencode`, `agy`, `pi` or a `command` array, with optional model, profile, provider, effort and args). With no model configured it prints the findings for the calling agent to judge.
+
 ### Changed
+- `deslop-agent` no longer pins Sonnet; it inherits the session model and judges findings only when no small model is configured.
+- `--scope=repo` reads files in batches and skips lock, vendored and recorded-data files, which no check reads: on a 200,000-file repository it finishes in about half a minute instead of running out of memory.
 - Breaking: deslop now checks a change for what current coding models leave behind, not the debug prints and TODO stubs older models left. The detector (`scripts/detect.js`, `detector/`) is rewritten around git: leftover mentions of files, flags, env vars, functions and values the change removed or replaced; cited paths and heading anchors that do not exist; docs-only or test-only claims over code changes; review history in code comments; tests with no assertion; code inserted between a doc comment and its item; rules a doc or prompt rewrite dropped; unwired additions; conflict markers, secrets and machine-local paths; shellcheck, ruff and actionlint on added lines.
 - Default scope is the branch diff against its merge base. `--scope=repo` or a path scans tracked files without a diff. The PR body (`--pr-body`) and commit messages are checked against the diff.
-- The agent confirms each finding by reading the flagged line and returns only confirmed ones. `fixes` use `next-task:simple-fixer`'s actions (`remove-line`, `replace` with `old`/`new`, `insert-after`, `insert-before`), so next-task can apply them as they are.
+- Each finding is confirmed by reading the flagged line (by the small model, or the agent when none is configured), and only confirmed ones are returned. `fixes` use `next-task:simple-fixer`'s actions (`remove-line`, `replace` with `old`/`new`, `insert-after`, `insert-before`), so next-task can apply them as they are.
 - Measured on 39 agent-written pull requests: 1.x reported 3,367 findings at 0.5% precision and caught none of the 106 defects reviewers found; 2.0 reports 57, of which 23 of 25 HIGH are real. On 48 held-out pull requests it reports 9, 3 of 4 HIGH real.
 - `missing-companion`: files the repository declares as changing together (`together` in `.deslop.json`), or that recent history almost always changes together, where the change edited one side only.
 

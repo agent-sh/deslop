@@ -1,7 +1,7 @@
 {
   "name": "deslop",
   "version": "5.5.0",
-  "description": "Checks a change for what current coding models leave behind: stale mentions of deleted or renamed things, dead paths and anchors, review notes in comments, tests that cannot fail",
+  "description": "One cleanup pass over a change: leftovers of renamed or deleted things, docs out of sync with the code, duplicated code, overgrown functions and agent-config errors, each confirmed by a small model",
   "author": {
     "name": "Avi Fenesh",
     "email": "[email protected]",
@@ -15,6 +15,8 @@
     "cleanup",
     "refactoring",
     "maintenance",
-    "slop-detection"
+    "slop-detection",
+    "doc-sync",
+    "duplicate-code"
   ]
 }

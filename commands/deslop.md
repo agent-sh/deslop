@@ -1,13 +1,13 @@
 ---
-description: "Check a change for what current coding models leave behind: mentions of deleted or renamed things, paths and anchors that do not exist, review notes in code comments, tests that cannot fail. Reports by default; `apply` fixes confirmed findings. Use for 'deslop', 'clean up slop', 'check my diff for leftovers'."
-codex-description: 'Use when user asks to "deslop", "clean up slop", "check my diff for leftovers", "find stale docs after a rename". Checks a change for what current coding models leave behind and fixes confirmed findings on request.'
+description: "One cleanup pass over a change: leftovers of renamed or deleted things, docs out of sync with the code, duplicated code, functions grown too large, agent-config errors. A small model confirms each finding. Reports by default; `apply` fixes confirmed findings. Use for 'deslop', 'clean up slop', 'sync docs', 'check my diff for leftovers'."
+codex-description: 'Use when user asks to "deslop", "clean up slop", "sync docs", "find duplicated code", "check my diff for leftovers". One cleanup pass over a change; a small model confirms findings and fixes are applied on request.'
 argument-hint: "[report|apply] [--scope=diff|repo|PATH] [--base=REF]"
 allowed-tools: Task, Skill, Read, Edit, Bash(git:*), Bash(node:*), Bash(gh:*)
 ---
 
 # /deslop
 
-Find and fix the leftovers of a change: text that was true before it and is not now, references that resolve to nothing, and tests that cannot fail.
+Find and fix what a change left behind: text that was true before it and is not now, docs that no longer match the code, references that resolve to nothing, code copied instead of reused, functions grown too large, and tests that cannot fail.
 
 ## Arguments
 
@@ -21,7 +21,10 @@ If the scope is a path that does not exist, reply `Path not found: <path>` and s
 
 ## Scan
 
-Spawn `deslop:deslop-agent` with:
+Load the `deslop` skill with the same arguments and run its Run section here: the detector, then `confirm.js`, which hands the findings to the project's small model.
+
+- If `confirm.js` printed a result, that JSON is the `DESLOP_RESULT`. If it has an `"error"`, its `unconfirmed` findings still need judging: treat them as in the next point.
+- If it printed `deslop-confirm: no small model configured`, spawn `deslop:deslop-agent` to judge them:
 
 ```
 Mode: {mode}
@@ -30,9 +33,9 @@ Base: {base, if given}
 Return the DESLOP_RESULT block.
 ```
 
-Without the Task tool (Codex, OpenCode), load the `deslop` skill in this session with the same arguments.
+Without the Task tool (Codex, OpenCode), judge them in this session as the skill's Confirm section says.
 
-Read the JSON between `=== DESLOP_RESULT ===` and `=== END_RESULT ===`. If it is missing or does not parse, show what came back and stop; apply nothing.
+Read the JSON between `=== DESLOP_RESULT ===` and `=== END_RESULT ===` (or `confirm.js`'s output). If it is missing or does not parse, show what came back and stop; apply nothing.
 
 ## Report mode
 
