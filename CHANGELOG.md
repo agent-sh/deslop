@@ -7,8 +7,10 @@
 ### Changed
 - `/deslop` description says what the command does (report by default, remove on request) before its trigger phrases, and the agent and AGENTS.md lost lines current models do not need. Same contract.
 - `.agnix.toml` no longer disables the six rules that existed only for the old generated AGENTS.md, so the lint covers the new one.
-- Benchmark, profiling and custom CLI execution in `lib/` require a separate trusted host authorization callback. Plain command data and cached preferences cannot authorize a process. The callback approves the final immutable invocation for each launch. Callers pass `authorizeExecution` to the helpers; the migration list is in the README.
+- Breaking for direct callers of the `lib/` helpers: benchmark, profiling and custom CLI execution require a separate trusted host authorization callback. Plain command data and cached preferences cannot authorize a process. The callback approves the final immutable invocation for each launch. Callers pass `authorizeExecution` to the helpers; the migration list is in the README.
 - Generic tool availability checks accept only their original fixed command and flag pairs. Additional CLI probes use the callback-bound custom-source API.
+
+### Removed
 - Removed unused `lib/repo-map/` leftovers (cache, converter, installer, updater) and a stale `lib/binary/index.test.js`.
 
 ### Fixed
