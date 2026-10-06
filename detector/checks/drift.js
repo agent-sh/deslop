@@ -49,6 +49,8 @@ function definedNames(text, l) {
 }
 
 // old -> new token pairs from a removed line and the added line that reads most like it.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const VERSION_KEY = /^\s*"?version"?\s*[:=]/;
 
 function replacementPairs(file, headText) {
@@ -238,7 +240,7 @@ module.exports = {
             near.push(pkg.toLowerCase());
             v.byNameOnly = true;
             // A dependency range (^1.3.0, >=1.3.0) in another manifest still admits the new version.
-            hs = hs.filter((h) => !MANIFEST.test(h.file) && !new RegExp(`[\\^~>=<]\\s*v?${t.replace(/[.]/g, '\\.')}`).test(h.text));
+            hs = hs.filter((h) => !MANIFEST.test(h.file) && !new RegExp(`[\\^~>=<]\\s*v?${escapeRe(t)}`).test(h.text));
           }
           // Other entries of the file being edited are other entities; the author saw them.
           hs = hs.filter((h) => ctx.kindOf(h.file) !== 'test' && h.file !== v.from && (ty === 'number' || near.some((w) => h.text.toLowerCase().includes(w))));
