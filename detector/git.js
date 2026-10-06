@@ -66,6 +66,8 @@ const EXCLUDE_GLOBS = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 
   .map((g) => `**/${g}`);
 const EXCLUDE = EXCLUDE_GLOBS.map((g) => `:(exclude,glob)${g}`);
 
+// git grep tries every pattern on every line; on a large repo that can take minutes.
+const SLOW_SEARCH_MS = 180000;
 let rgOk;
 function haveRg() {
   if (rgOk === undefined) {
@@ -78,12 +80,24 @@ function haveRg() {
 // ripgrep matches all tokens in one pass (Aho-Corasick); git grep tries each pattern on each
 // line, which takes minutes on a large repo with a few hundred tokens. rg reads the work tree,
 // so it is used only when the scan targets the checked-out tree.
+// No per-file match cap: it counts lines across all tokens, so common tokens would hide the
+// one line that mentions a rare one.
 function rgMany(root, tokens, tracked) {
-  const args = ['-n', '--null', '--no-heading', '--with-filename', '--no-config', '-F', '--hidden', '-M', '2000', '-f', '-', '-g', '!.git'];
+  const args = ['-n', '--null', '--no-heading', '--with-filename', '--no-config', '-F', '--hidden', '-M', '4000', '-f', '-', '-g', '!.git'];
   for (const g of EXCLUDE_GLOBS) args.push('-g', `!${g}`);
   args.push('.');
   const r = spawnSync('rg', args, { cwd: root, input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX });
-  if (r.error || (r.status !== 0 && r.status !== 1)) return null;
+  if (r.error && r.error.code === 'ENOBUFS') {
+    // Too much output for one pass: search each half on its own. A single token that fills
+    // the buffer is everywhere, which every check treats as vocabulary, so it gets no hits.
+    if (tokens.length === 1) return [];
+    const half = Math.ceil(tokens.length / 2);
+    const a = rgMany(root, tokens.slice(0, half), tracked);
+    const b = a && rgMany(root, tokens.slice(half), tracked);
+    return a && b ? a.concat(b) : null;
+  }
+  // Exit 2 means some file could not be read; the matches printed are still valid.
+  if (r.error || r.status > 2) return null;
   const hits = [];
   for (const rec of r.stdout.split('\n')) {
     const z = rec.indexOf('\0');
@@ -109,7 +123,11 @@ function grepMany(root, rev, tokens, { pathspecs = [], tracked } = {}) {
   const args = ['grep', '-n', '-I', '--no-color', '-F', '-z', '--full-name', '-f', '-'];
   if (rev) args.push(rev);
   args.push('--', ...(pathspecs.length ? pathspecs : ['.']), ...EXCLUDE);
-  const out = git(root, args, { input: tokens.join('\n') + '\n', allowFail: true });
+  const r = spawnSync('git', ['-C', root, ...args], { input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX, timeout: SLOW_SEARCH_MS });
+  if (r.error && r.error.code === 'ETIMEDOUT') {
+    throw new Error(`git grep took over ${SLOW_SEARCH_MS / 1000}s on this repository; install ripgrep (rg) and run again`);
+  }
+  const out = r.status === 0 ? r.stdout : '';
   const hits = [];
   // -z output: "<rev>:<file>\0<line>\0<text>\n" (rev prefix only when rev given)
   for (const rec of out.split('\n')) {

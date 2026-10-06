@@ -1,6 +1,6 @@
 # deslop
 
-This repo is the deslop plugin: AI slop cleanup with minimal diffs that preserve behavior. Part of the [agentsys](https://github.com/agent-sh/agentsys) ecosystem; skills follow https://agentskills.io.
+This repo is the deslop plugin: it checks a change for what current coding models leave behind (stale mentions, dead references, tests that cannot fail) and fixes what it confirms. Part of the [agentsys](https://github.com/agent-sh/agentsys) ecosystem; skills follow https://agentskills.io.
 
 ## Rules
 

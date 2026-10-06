@@ -197,6 +197,23 @@ describe('unwired additions and secrets', () => {
     expect(checks(detect(root))).toContain('no-caller@src/a.py:4');
   });
 
+  test('a call is found even when its file mentions many other new names', () => {
+    // Regression: a per-file match cap in the search hid the call line behind earlier matches.
+    const defs = Array.from({ length: 30 }, (_, i) => `function helperNumber${i}() { return ${i}; }`).join('\n');
+    const calls = Array.from({ length: 30 }, (_, i) => `helperNumber${i}();`).join('\n');
+    const root = repo({ 'src/a.js': '1;\n' }, { 'src/a.js': `${defs}\n${calls}\nfunction lateHelper() { return 1; }\nlateHelper();\n` });
+    expect(detect(root).filter((i) => i.check === 'no-caller')).toEqual([]);
+  });
+
+  test('a new module loaded by name is wired; one nothing loads is not', () => {
+    const root = repo(
+      { 'lib/index.js': "module.exports = ['alpha'].map((n) => require(`./checks/${n}`));\n", 'lib/checks/alpha.js': 'module.exports = 1;\n' },
+      { 'lib/index.js': "module.exports = ['alpha', 'bravo'].map((n) => require(`./checks/${n}`));\n", 'lib/checks/bravo.js': 'module.exports = 2;\n', 'scripts/orphan-tool.sh': '#!/bin/sh\necho x\n' },
+    );
+    const files = detect(root).filter((i) => i.check === 'no-caller').map((i) => i.file);
+    expect(files).toEqual(['scripts/orphan-tool.sh']);
+  });
+
   test('a committed key in an added line', () => {
     const root = repo({ 'a.env': 'X=1\n' }, { 'a.env': 'X=1\nAWS_KEY=AKIAABCDEFGHIJKLMNOP\n' });
     const s = detect(root).find((i) => i.check === 'secret');

@@ -78,7 +78,8 @@ module.exports = {
         if (OWN_HOME.length > 6 && a.text.includes(OWN_HOME + '/') && !homes.length) homes.push(OWN_HOME + '/');
         for (const h of homes.slice(0, 1)) {
           // One per file and a few per run: the first ones say what to fix.
-          if (f.kind === 'changelog' || localInFile || localPaths >= 5) continue;
+          // Test fixtures hold such paths on purpose.
+          if (f.kind === 'changelog' || f.kind === 'test' || localInFile || localPaths >= 5) continue;
           localInFile = true;
           localPaths++;
           const m = [h];
@@ -91,7 +92,8 @@ module.exports = {
             message: `machine-local path \`${m[0]}\` committed; it breaks on any other checkout and can leak a username`,
           });
         }
-        const text = citingText(f, a.text);
+        // A changelog names files that are gone on purpose: it records their removal.
+        const text = f.kind === 'changelog' ? null : citingText(f, a.text);
         if (!text) continue;
         const seen = new Set();
         for (const m of text.matchAll(MD_LINK)) { seen.add(m[1]); check(f, a.line, a.text, m[1], 'link', ''); }

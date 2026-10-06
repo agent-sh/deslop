@@ -1,7 +1,7 @@
 {
   "name": "@agentsys/deslop",
   "version": "1.3.0",
-  "description": "AI slop cleanup with minimal diffs and behavior preservation",
+  "description": "Checks a change for what current coding models leave behind: stale mentions of deleted or renamed things, dead paths and anchors, review notes in comments, tests that cannot fail",
   "author": {
     "name": "Avi Fenesh",
     "email": "[email protected]",

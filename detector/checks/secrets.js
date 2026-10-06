@@ -29,7 +29,8 @@ module.exports = {
           const m = re.exec(a.text);
           if (!m) continue;
           if (name === 'url-credentials' && /:\/\/[^:]+:(\$\{?|<|\*{3}|x{3}|password|pass|secret|token)/i.test(a.text)) continue;
-          items.push({ check: 'secret', severity: 'high', file: f.path, line: a.line, excerpt: a.text.trim().replace(m[0], m[0].slice(0, 8) + '...').slice(0, 100), message: `looks like a committed ${name}; rotate it if real` });
+          // Tests carry fake keys on purpose; still worth a look, not a certainty.
+          items.push({ check: 'secret', severity: f.kind === 'test' ? 'review' : 'high', file: f.path, line: a.line, excerpt: a.text.trim().replace(m[0], m[0].slice(0, 8) + '...').slice(0, 100), message: `looks like a committed ${name}; rotate it if real` });
           break;
         }
       }
