@@ -19,6 +19,9 @@ function detect(root, opts) {
   const disabled = new Set(opts.disable || []);
   let items = [];
   const errors = [];
+  // What a check could not cover, such as a language whose linter is not installed.
+  const skipped = [];
+  ctx.skip = (what) => skipped.push(what);
   for (const c of CHECKS) {
     if (!c.scopes.includes(ctx.scope) || disabled.has(c.id)) continue;
     try {
@@ -53,6 +56,7 @@ function detect(root, opts) {
     shown: Math.min(total, max),
     items: items.slice(0, max),
     errors,
+    skipped,
   };
 }
 
@@ -70,6 +74,7 @@ function formatText(r) {
     if (it.excerpt) out.push(`    ${it.excerpt}`);
   }
   for (const e of r.errors) out.push(`[WARN] check failed: ${e}`);
+  for (const s of r.skipped) out.push(`[WARN] ${s}`);
   return out.join('\n');
 }
 

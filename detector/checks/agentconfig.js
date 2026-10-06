@@ -2,18 +2,9 @@
 // Agent configuration the change touched (instruction files, skills, agents, commands, plugin
 // manifests, hooks, MCP configs), run through agnix when it is installed. agnix knows each
 // harness's schema; this check only maps its diagnostics onto the change.
-const { spawnSync } = require('child_process');
+const { runJson, installed } = require('../proc');
 
 const AGENT_CONFIG = /(^|\/)(CLAUDE|AGENTS|GEMINI)(\.local)?\.md$|(^|\/)SKILL\.md$|(^|\/)(agents|commands)\/[^/]+\.md$|(^|\/)\.claude-plugin\/[^/]+\.json$|(^|\/)hooks\/[^/]*\.json$|(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.?mcp\.json$|(^|\/)\.cursor\/rules\/[^/]+$|(^|\/)\.github\/copilot-instructions\.md$/;
-
-let available;
-function haveAgnix() {
-  if (available === undefined) {
-    const r = spawnSync('agnix', ['--version'], { encoding: 'utf8' });
-    available = !r.error && r.status === 0;
-  }
-  return available;
-}
 
 module.exports = {
   id: 'agentconfig',
@@ -21,14 +12,9 @@ module.exports = {
   run(ctx) {
     const files = ctx.files.filter((f) => f.status !== 'D' && AGENT_CONFIG.test(f.path));
     // agnix reads files from disk, so it can only check a scan of the checked-out tree.
-    if (!files.length || (ctx.head && ctx.head !== 'HEAD') || !haveAgnix()) return [];
-    const r = spawnSync('agnix', ['--format', 'json', ...files.map((f) => f.path)], { cwd: ctx.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 120000 });
-    // agnix exits 1 when it finds errors, so the status says nothing; output that is not its JSON
-    // means it did not run, and an empty result then would read as a clean change.
-    let out;
-    try { out = JSON.parse(r.stdout || ''); } catch {
-      throw new Error(`agnix gave no JSON report (${r.error ? r.error.message : `exit ${r.status}`}): ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
-    }
+    if (!files.length || (ctx.head && ctx.head !== 'HEAD') || !installed('agnix')) return [];
+    // agnix exits 1 when it finds errors.
+    const out = runJson('agnix', ['--format', 'json', ...files.map((f) => f.path)], { cwd: ctx.root, ok: [0, 1], timeout: 120000 });
     const byPath = new Map(files.map((f) => [f.path, f]));
     const items = [];
     for (const d of out.diagnostics || []) {

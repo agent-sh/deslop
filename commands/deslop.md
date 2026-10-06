@@ -39,7 +39,7 @@ Read the JSON between `=== DESLOP_RESULT ===` and `=== END_RESULT ===` (or `conf
 
 ## Report mode
 
-List each confirmed finding as `file:line - message`, grouped by check, then one line: `N reported, M confirmed, K dismissed`. Say the change is clean only when nothing was confirmed, every reported finding was judged and `detectorErrors` is absent; a finding still in `unconfirmed` is listed as unjudged and each detector error is shown, never counted as clean. Mention `/deslop apply` only when `fixes` is not empty.
+List each confirmed finding as `file:line - message`, grouped by check, then one line: `N reported, M confirmed, K dismissed`. Say the change is clean only when nothing was confirmed, every reported finding was judged and `detectorErrors` is absent; a finding still in `unconfirmed` is listed as unjudged and each detector error is shown, never counted as clean. Name each `skipped` entry, so a language no linter measured is not read as covered. Mention `/deslop apply` only when `fixes` is not empty.
 
 ## Apply mode
 

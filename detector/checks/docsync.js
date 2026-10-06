@@ -253,7 +253,10 @@ function docExampleStale(ctx) {
 const VERSIONED = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|plugin\.json|marketplace\.json|gemini-extension\.json|manifest\.json)$/;
 // A package is its exact name: @one/kit, @two/kit, kit, foo-bar and foo_bar are five packages,
 // as npm sees them. Folding names together reported versions of unrelated packages.
-const versioned = (ctx) => [...ctx.headFiles].filter((p) => VERSIONED.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)) && !SNAPSHOT.test(p));
+// Manifests under test or fixture paths pin old versions on purpose (a fixture for the old
+// format), so they are neither a bump to follow nor a mirror to update.
+const isManifest = (ctx, p) => VERSIONED.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)) && ctx.kindOf(p) !== 'test' && !SNAPSHOT.test(p);
+const versioned = (ctx) => [...ctx.headFiles].filter((p) => isManifest(ctx, p));
 
 // {name, version, line} for each object in a JSON manifest that has both, with the line of
 // its version value (top level and nested entries such as a marketplace's plugins).
@@ -322,7 +325,7 @@ function versionMismatch(ctx) {
   if (ctx.scope !== 'diff' || !ctx.baseReader) return items;
   const bumps = [];
   for (const f of ctx.files) {
-    if (!VERSIONED.test(f.path) || f.status === 'D' || SKIP_KINDS.has(f.kind) || SNAPSHOT.test(f.path)) continue;
+    if (f.status === 'D' || !isManifest(ctx, f.path)) continue;
     const before = records(f.oldPath, ctx.baseReader.read(f.oldPath));
     const after = records(f.path, ctx.headReader.read(f.path));
     for (const a of after) {
@@ -332,7 +335,7 @@ function versionMismatch(ctx) {
   }
   if (!bumps.length) return items;
   const manifests = versioned(ctx);
-  const texts = ctx.headReader.readMany ? ctx.headReader.readMany(manifests) : manifests.map((p) => ctx.headReader.read(p));
+  const texts = ctx.headReader.readMany(manifests);
   const lines = new Map();
   manifests.forEach((p, i) => {
     for (const r of records(p, texts[i])) {
@@ -363,7 +366,7 @@ function pinnedVersions(ctx) {
   const items = [];
   if (ctx.scope !== 'diff') return items;
   const manifests = versioned(ctx);
-  const texts = ctx.headReader.readMany ? ctx.headReader.readMany(manifests) : manifests.map((p) => ctx.headReader.read(p));
+  const texts = ctx.headReader.readMany(manifests);
   const current = new Map();
   manifests.forEach((p, i) => {
     for (const r of records(p, texts[i])) {

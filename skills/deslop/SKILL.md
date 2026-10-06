@@ -32,7 +32,7 @@ Arguments: `$ARGUMENTS`
 | `displaced-doc-comment` | New code was inserted between a doc comment and the item it documented. | Move the comment back above its item. |
 | `duplicate-line` | A comment or prose line written twice. | |
 | `duplicate-code` | Added code (60 tokens and 6 distinct lines or more) that already exists elsewhere in the repo, or twice in the change. | Do both copies do the same job? Generated or deliberately mirrored copies are fine. |
-| `complexity` | A function this change pushed past 80 lines, 5 levels of control-flow nesting or 6 parameters. | Would it read better split? A flat table or a dispatcher can stay. |
+| `complexity` | The language's linter (ruff, the repository's eslint, golangci-lint, clippy) rates a function or block on a line this change added as too complex; the message quotes the linter. | Would it read better split? A flat table or a dispatcher can stay. |
 | `no-caller`, `unread-setting` | Something added that nothing calls or reads. | Entry points, framework hooks and public API are wired from outside. |
 | `dropped-rule` | A doc or prompt rewrite removed a rule or reason whose words appear nowhere in the new text. | Was dropping it intended? Current models shorten well but lose exceptions. |
 | `missing-companion` | A file the repo declares (`together` in `.deslop.json`) or history shows changing with an edited file was left alone. | Does it describe or mirror what changed? |
@@ -62,7 +62,7 @@ Pass the PR body when there is one: `scope-claim` and `em-dash` read it along wi
 
 It prints one of two things:
 
-- **A result**: JSON with `findings`, `fixes`, `dismissed`, `unconfirmed` and `summary`. Every fix was checked against the file. Use it as the `DESLOP_RESULT` below. If it carries an `"error"` (the model failed, replied with invalid JSON or left a finding unjudged), every finding is in `unconfirmed`: judge those yourself as in Confirm. If it carries `detectorErrors`, some checks did not run: report them. Never call a change clean while `unconfirmed` or `detectorErrors` is not empty.
+- **A result**: JSON with `findings`, `fixes`, `dismissed`, `unconfirmed` and `summary`. Every fix was checked against the file. Use it as the `DESLOP_RESULT` below. If it carries an `"error"` (the model failed, replied with invalid JSON or left a finding unjudged), every finding is in `unconfirmed`: judge those yourself as in Confirm. If it carries `detectorErrors`, some checks did not run: report them. If it carries `skipped`, those languages were not measured (their linter is missing): name them. Never call a change clean while `unconfirmed` or `detectorErrors` is not empty.
 - **`deslop-confirm: no small model configured`**, then each finding with its context. Judge them yourself as in Confirm.
 
 ## Confirm
@@ -99,4 +99,4 @@ Return this block last. `/deslop` and `/next-task` parse it; `fixes` use `next-t
 === END_RESULT ===
 ```
 
-`severity` is the detector's level for that finding: `high` or `review`. Findings about the PR body or commit messages have `file: "(PR text)"` and `line: 0`; they are fixed by editing the PR or the next commit message, never by a file edit. `action` is `remove-line`, `replace` (`old` to `new` on that line), `insert-after` or `insert-before` (`new`). Paths are relative to the repository root. The extra fields `confirm.js` adds (`dismissed`, `unconfirmed`, `detectorErrors`, `model`) may stay in the block. On failure return the block with empty arrays and an `"error"` field.
+`severity` is the detector's level for that finding: `high` or `review`. Findings about the PR body or commit messages have `file: "(PR text)"` and `line: 0`; they are fixed by editing the PR or the next commit message, never by a file edit. `action` is `remove-line`, `replace` (`old` to `new` on that line), `insert-after` or `insert-before` (`new`). Paths are relative to the repository root. The extra fields `confirm.js` adds (`dismissed`, `unconfirmed`, `detectorErrors`, `skipped`, `model`) may stay in the block. On failure return the block with empty arrays and an `"error"` field.

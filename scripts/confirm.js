@@ -365,6 +365,8 @@ function main(argv) {
   const result = { mode: o.mode, scope: report.scope || 'diff', base: report.base, findings: [], fixes: [], dismissed: [], unconfirmed: [], summary: { reported: items.length, confirmed: 0, dismissed: 0, fixable: 0 } };
   // A check that failed found nothing, which is not the same as finding nothing.
   if (Array.isArray(report.errors) && report.errors.length) result.detectorErrors = report.errors.map(String);
+  // Languages a check could not measure, so the summary does not imply they were covered.
+  if (Array.isArray(report.skipped) && report.skipped.length) result.skipped = report.skipped.map(String);
   if (!items.length) { console.log(JSON.stringify(result, null, 2)); return 0; }
   const parts = batches(items, o.repo);
   const model = resolveModel(o, parts[0].prompt);

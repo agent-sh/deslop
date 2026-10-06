@@ -58,13 +58,13 @@ node scripts/detect.js . --json | node scripts/confirm.js   # findings confirmed
 | `doc-example-stale` | A docs example running a command the change removed: a slash command whose file it deleted or renamed, or a package bin it took out of `package.json`. Flags the change removed or renamed show up as `stale-mention` |
 | `version-mismatch` | A package version moved in one manifest and not in another manifest with the same exact package name (plugin.json, marketplace.json, Cargo.toml, pyproject.toml; `@one/kit`, `kit`, `foo-bar` and `foo_bar` are four different names), or a new docs line pinning another version |
 | `duplicate-code` | Added code of 60 tokens and 6 distinct lines or more that already exists elsewhere in the repo, or twice in the change |
-| `complexity` | A function the change pushed past 80 lines, 5 levels of control-flow nesting or 6 parameters (JS/TS, Python, Rust, Go, shell) |
+| `complexity` | A function the change made too complex, as the language's linter measures it, on a line the change added: ruff (C901, PLR0912, PLR0913, PLR0915) for Python; the repository's eslint (`complexity` 10, `max-depth` 4, `max-params` 5) for JS/TS when it has an eslint config; golangci-lint (gocyclo, nestif) for Go; clippy `cognitive_complexity` for Rust. A language whose linter is missing is named under `skipped` |
 | `agent-config` | agnix errors in instruction files, skills, agents, commands, plugin manifests, hooks and MCP configs the change touched, when agnix is installed |
 | `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON |
 | `lint` | shellcheck, ruff and actionlint on added lines, when installed |
 | `em-dash` | House style; off with `.deslop.json` |
 
-`duplicate-code` and `complexity` skip tests, generated files and snapshot or dated record folders; the doc sync checks skip those folders too (`versioned_docs/`, `archive/`), since they keep old flags and versions on purpose. With `--scope=repo` they audit the whole repository instead of a change.
+`duplicate-code` and `complexity` skip tests, generated files and snapshot or dated record folders; the doc sync checks skip those folders too (`versioned_docs/`, `archive/`), and `version-mismatch` skips manifests under test and fixture paths, since they keep old flags and versions on purpose. With `--scope=repo` they audit the whole repository instead of a change. eslint, golangci-lint and clippy read the checked-out files, so `complexity` skips JS/TS, Go and Rust when `--head` names another revision; clippy builds the crate, so its first run on a cold cache takes as long as `cargo check`.
 
 Logic errors, edge cases and races need a reviewer, so deslop does not guess at them.
 
@@ -93,7 +93,7 @@ Options missing from the role are left out; `args` are appended last. The step e
 
 With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
 
-`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a search that did not run, is carried into the result as `detectorErrors`, so a failed scan never reads as clean.
+`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a git, ripgrep or linter run that could not start, timed out, was killed or exited with an unexpected status, is carried into the result as `detectorErrors`, so a failed scan never reads as clean. What a check could not cover, such as a language whose linter is not installed, is carried as `skipped`.
 
 ## Configuration
 
