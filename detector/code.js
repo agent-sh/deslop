@@ -333,9 +333,41 @@ function signatureAt(toks, i, l) {
     // const name = (...) => { ... }
     let j = i + 3;
     if (toks[j]?.v === 'async') j++;
-    if (toks[j]?.v === '(' && toks[matching(toks, j) + 1]?.v === '=' && toks[matching(toks, j) + 2]?.v === '>') return { nameIdx: i + 1, paren: j };
+    if (toks[j]?.v === '(' && toks[matching(toks, j) + 1]?.v === '=' && toks[matching(toks, j) + 2]?.v === '>') return { nameIdx: i + 1, paren: j, arrow: true };
   }
   return null;
+}
+
+// Keywords that start the next declaration. Met before a body brace, they mean the signature
+// had no body and the brace belongs to what follows.
+const DECLARES = {
+  js: new Set(['function', 'interface', 'type', 'class', 'enum', 'namespace', 'module', 'declare', 'export', 'import', 'const', 'let', 'var', 'abstract']),
+  rust: new Set(['fn', 'struct', 'enum', 'trait', 'mod', 'use', 'static', 'const', 'type', 'pub']),
+  go: new Set(['func', 'type', 'var', 'const', 'import']),
+  sh: new Set(),
+};
+
+// Index of the brace that opens the body of a signature ending at toks[close], or -1. A
+// declaration without a body (a TypeScript overload, declare or abstract signature, interface or
+// type member, a Rust trait method, a Go assembly stub) must not borrow the braces of whatever
+// comes after it, so the brace has to follow the signature: directly, or after a return type that
+// does not run past a line end (JS/TS and shell), a ';', a '}' or another declaration.
+function bodyBrace(toks, close, l) {
+  for (let k = close + 1; k < toks.length && k - close < 200;) {
+    const v = toks[k].v;
+    const p = toks[k - 1].v;
+    if (v === '{') {
+      // In a TypeScript return type, a brace after ':', '|', '&', ',', '<' or '=>' is an object type.
+      const typeLiteral = l === 'js' && k > close + 1 && (p === ':' || p === '|' || p === '&' || p === ',' || p === '<' || (p === '>' && toks[k - 2]?.v === '='));
+      if (!typeLiteral) return k;
+      k = matching(toks, k) + 1;
+      continue;
+    }
+    if (v === ';' || v === '}' || DECLARES[l].has(v)) return -1;
+    if ((l === 'js' || l === 'sh') && toks[k].line !== toks[k - 1].line) return -1;
+    k = v === '(' || v === '[' ? matching(toks, k) + 1 : k + 1;
+  }
+  return -1;
 }
 
 // JS, Rust, Go and shell: a named definition and the braces of its body.
@@ -347,13 +379,9 @@ function braceFunctions(lexed, l) {
     if (!sig) continue;
     const { nameIdx, paren } = sig;
     const close = paren >= 0 ? matching(toks, paren) : nameIdx;
-    // The body brace: the first { after the signature, before a ; that would end a declaration.
-    let b = close + 1;
-    while (b < toks.length && toks[b].v !== '{' && toks[b].v !== ';' && b - close < 200) {
-      if (toks[b].v === '(') b = matching(toks, b);
-      b++;
-    }
-    if (toks[b]?.v !== '{') continue;
+    // An arrow function's body brace comes right after =>; without one its body is an expression.
+    const b = sig.arrow ? (toks[close + 3]?.v === '{' ? close + 3 : -1) : bodyBrace(toks, close, l);
+    if (b < 0) continue;
     const end = matching(toks, b);
     out.push({ name: toks[nameIdx].v, start: Math.min(toks[i].line, toks[nameIdx].line), end: toks[end].line, params: paren >= 0 ? paramCount(toks, paren, close, l) : 0, bodyStart: toks[b].line, open: b, close: end });
     if (paren >= 0) i = paren;

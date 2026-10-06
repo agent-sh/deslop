@@ -105,6 +105,16 @@ const EXCLUDE = EXCLUDE_GLOBS.map((g) => `:(exclude,glob)${g}`);
 
 // git grep tries every pattern on every line; on a large repo that can take minutes.
 const SLOW_SEARCH_MS = 180000;
+
+// git grep exits 1 when nothing matches. Anything else that is not success (a timeout, a signal,
+// a bad revision) means the search did not run, and treating it as "no matches" would let the
+// check that asked report a clean change.
+function grepFailed(r) {
+  if (r.error && r.error.code === 'ETIMEDOUT') return new Error(`git grep took over ${SLOW_SEARCH_MS / 1000}s on this repository; install ripgrep (rg) and run again`);
+  if (r.error) return new Error(`git grep could not run: ${r.error.message}`);
+  if (r.status !== 0 && r.status !== 1) return new Error(`git grep failed (${r.status === null ? `signal ${r.signal}` : `exit ${r.status}`}): ${(r.stderr || '').trim().slice(0, 200)}`);
+  return null;
+}
 let rgOk;
 function haveRg() {
   if (process.env.DESLOP_NO_RG) return false; // force the git grep path (tests, debugging)
@@ -163,9 +173,8 @@ function grepMany(root, rev, tokens, { pathspecs = [], tracked, untracked = fals
   else if (untracked) args.push('--untracked');
   args.push('--', ...(pathspecs.length ? pathspecs : ['.']), ...EXCLUDE);
   const r = spawnSync('git', ['-C', root, ...args], { input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX, timeout: SLOW_SEARCH_MS });
-  if (r.error && r.error.code === 'ETIMEDOUT') {
-    throw new Error(`git grep took over ${SLOW_SEARCH_MS / 1000}s on this repository; install ripgrep (rg) and run again`);
-  }
+  const failed = grepFailed(r);
+  if (failed) throw failed;
   const out = r.status === 0 ? r.stdout : '';
   const hits = [];
   // -z output: "<rev>:<file>\0<line>\0<text>\n" (rev prefix only when rev given)
@@ -197,6 +206,8 @@ function filesWithAny(root, rev, tokens, { tracked, untracked = false } = {}) {
   else if (untracked) args.push('--untracked');
   args.push('--', '.', ...EXCLUDE);
   const r = spawnSync('git', ['-C', root, ...args], { input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX, timeout: SLOW_SEARCH_MS });
+  const failed = grepFailed(r);
+  if (failed) throw failed;
   if (r.status !== 0) return [];
   return r.stdout.split('\0').filter(Boolean).map((f) => (rev && f.startsWith(rev + ':') ? f.slice(rev.length + 1) : f));
 }

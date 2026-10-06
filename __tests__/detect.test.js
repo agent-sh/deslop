@@ -511,22 +511,24 @@ describe('doc sync', () => {
   });
 });
 
+// A function of 12 lines and 60-odd tokens: long enough to count as a copy when repeated.
+const block = (name, label) => [
+  `function ${name}(items, options) {`,
+  '  const seen = new Set();',
+  '  const out = [];',
+  '  for (const item of items) {',
+  '    if (seen.has(item.id)) continue;',
+  '    seen.add(item.id);',
+  `    const score = item.weight * options.scale + options.offset;`,
+  `    if (score < options.floor) { log("${label} below floor", item.id); continue; }`,
+  '    out.push({ id: item.id, score, tags: item.tags.filter(Boolean) });',
+  '  }',
+  '  out.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));',
+  '  return out.slice(0, options.limit);',
+  '}',
+].join('\n');
+
 describe('code shape', () => {
-  const block = (name, label) => [
-    `function ${name}(items, options) {`,
-    '  const seen = new Set();',
-    '  const out = [];',
-    '  for (const item of items) {',
-    '    if (seen.has(item.id)) continue;',
-    '    seen.add(item.id);',
-    `    const score = item.weight * options.scale + options.offset;`,
-    `    if (score < options.floor) { log("${label} below floor", item.id); continue; }`,
-    '    out.push({ id: item.id, score, tags: item.tags.filter(Boolean) });',
-    '  }',
-    '  out.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));',
-    '  return out.slice(0, options.limit);',
-    '}',
-  ].join('\n');
 
   test('added code that repeats existing code names the other place; a table of same-shaped rows and test code do not', () => {
     const root = repo(
@@ -602,6 +604,35 @@ describe('code shape', () => {
 
 });
 
+describe('complexity in TypeScript', () => {
+  test('bodyless declarations do not borrow the braces after them; a real long function next to them is still measured', () => {
+    const fields = Array.from({ length: 90 }, (_, i) => `  field${i}: number`).join('\n');
+    const lines = Array.from({ length: 90 }, (_, i) => `  total += ${i}`).join('\n');
+    const root = repo(
+      { 'README.md': 'x\n' },
+      {
+        'types/index.d.ts': `declare function parse(data: string): Result\nexport interface Result {\n${fields}\n}\n`,
+        'src/api.ts': [
+          'export function load(a: string): Result',
+          'export function load(a: string, b: number, c: number, d: number, e: number, f: number): Result',
+          `export function load(a: any): Result {\n  let total = 0\n${lines}\n  return { total } as Result\n}`,
+          'export abstract class Base {',
+          '  abstract run(a: number, b: number, c: number, d: number, e: number, f: number): void',
+          '}',
+          'export interface Handler {',
+          '  handle(a: number, b: number, c: number, d: number, e: number, f: number): void',
+          '  close(): { done: boolean }',
+          '}',
+          '',
+        ].join('\n'),
+      },
+    );
+    const items = detect(root).filter((i) => i.check === 'complexity');
+    expect(items.map((i) => `${i.file}:${i.line}`)).toEqual(['src/api.ts:3']);
+    expect(items[0].message).toContain('`load` is 94 lines long');
+  });
+});
+
 describe('agent config', () => {
   const skill = '---\nname: Bad Name\ndescription: does things\n---\n\nBody.\n';
   // A stand-in agnix that reports fixed diagnostics, so the mapping is tested without the real tool.
@@ -668,6 +699,23 @@ process.stdout.write(JSON.stringify({ confirmed: [], dismissed: ids.map((id) => 
     const cut = pipe(root, ['--max=40']).confirm;
     expect(cut.status).toBe(1);
     expect(cut.stderr).toMatch(/holds 40 of the detector's 45 findings/);
+  });
+
+  test('a duplicate search that fails is a detector error, not a clean result', () => {
+    const root = repo({ 'src/rank.js': `${block('rankItems', 'rank')}\nmodule.exports = { rankItems };\n` }, { 'src/score.js': `${block('scoreItems', 'score')}\nmodule.exports = { scoreItems };\n` });
+    fs.mkdirSync(root + '-tools');
+    roots.push(root + '-tools');
+    // A git whose file search (git grep -l) fails, as a timeout or a broken index would.
+    const bin = path.join(root + '-tools', 'bin');
+    fs.mkdirSync(bin);
+    const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+    fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = "-l" ] && { echo "fatal: simulated failure" >&2; exit 2; }; done\nexec ${realGit} "$@"\n`, { mode: 0o755 });
+    const ok = pipe(root, [], { DESLOP_NO_RG: '1' });
+    expect(ok.detected.items.map((i) => `${i.check}@${i.file}`)).toContain('duplicate-code@src/score.js');
+    expect(ok.detected.errors).toEqual([]);
+    const r = pipe(root, [], { DESLOP_NO_RG: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}` });
+    expect(r.detected.errors).toEqual(['duplicates: git grep failed (exit 2): fatal: simulated failure']);
+    expect(JSON.parse(r.confirm.stdout).detectorErrors).toEqual(r.detected.errors);
   });
 
   test('a check that failed reaches the result, with and without findings', () => {

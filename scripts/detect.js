@@ -26,7 +26,8 @@ Input
 
 Output
   --json              JSON instead of text
-  --max=N             findings to print (default 40 in text; JSON has all of them)
+  --max=N             findings to print (default: 40 in text, all in JSON; a --max given
+                      with --json caps the JSON too, which confirm.js refuses)
 
 Config: .deslop.json at the repo root: {"ignore": [globs], "disable": [check ids], "style": {"emDash": false},
 "together": [{"when": glob, "also": glob, "message": text}], "mineCochange": false}.

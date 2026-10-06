@@ -70,7 +70,7 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 
 ## The small model
 
-`scripts/confirm.js` sends each finding, with the flagged line and two lines around it, to a small model and keeps only what it confirms. Fixes come back in `next-task:simple-fixer`'s format and are checked against the file before they are returned. It runs, in this order:
+`scripts/confirm.js` sends each finding, with the flagged line and two lines around it, to a small model and keeps only what it confirms. Fixes come back in `next-task:simple-fixer`'s format and are checked against the file before they are returned. It reads only files inside the repository: a path that leaves it or goes through a symlink gets no context and no fix. It runs, in this order:
 
 1. `--cmd='["codex", "exec", "-p", "luna", "{prompt}"]'`: the command as a JSON array of strings, run without a shell. An element that is exactly `{prompt}` becomes the prompt; with none, the prompt goes to stdin.
 2. `DESLOP_SMALL_CMD`: the same JSON array, from the environment.
@@ -93,7 +93,7 @@ Options missing from the role are left out; `args` are appended last. The step e
 
 With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
 
-`detect.js --json` prints every finding (`--max` caps only the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed is carried into the result as `detectorErrors`, so a failed scan never reads as clean.
+`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a search that did not run, is carried into the result as `detectorErrors`, so a failed scan never reads as clean.
 
 ## Configuration
 

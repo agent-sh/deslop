@@ -147,11 +147,25 @@ function resolveModel(o, prompt) {
 
 // --- the prompt ---------------------------------------------------------------------------
 
+// The absolute path of a repository file, or null when the path leaves the repository or passes
+// through a symlink. A tracked link can point anywhere on the machine: its target is neither the
+// text the detector scanned nor a file a fix may edit, and sending it to a model discloses it.
+function repoFile(repo, file) {
+  let root;
+  let real;
+  try { root = fs.realpathSync(repo); } catch { return null; }
+  const want = path.resolve(root, file);
+  if (!want.startsWith(root + path.sep)) return null;
+  try { real = fs.realpathSync(want); } catch { return null; }
+  return real === want ? real : null;
+}
+
 function context(repo, file, line, cache) {
   if (!file || file === '(PR text)' || !line) return [];
   if (!cache.has(file)) {
     let lines = null;
-    try { lines = fs.readFileSync(path.join(repo, file), 'utf8').split('\n'); } catch { /* deleted or unreadable */ }
+    const at = repoFile(repo, file);
+    try { if (at) lines = fs.readFileSync(at, 'utf8').split('\n'); } catch { /* unreadable */ }
     cache.set(file, lines);
   }
   const lines = cache.get(file);
@@ -304,9 +318,10 @@ function checkFixes(fixes, confirmedItems, repo) {
   const lines = new Map();
   for (const f of fixes) {
     if (!confirmedItems.some((it) => it.file === f.file && it.line === f.line)) { rejected.push({ fix: f, why: 'not the line of a confirmed finding' }); continue; }
+    if (!repoFile(repo, f.file)) { rejected.push({ fix: f, why: 'not a file inside the repository (outside it or through a symlink)' }); continue; }
     if (!lines.has(f.file)) {
       let l = null;
-      try { l = fs.readFileSync(path.join(repo, f.file), 'utf8').split('\n'); } catch { /* unreadable */ }
+      try { l = fs.readFileSync(repoFile(repo, f.file), 'utf8').split('\n'); } catch { /* unreadable */ }
       lines.set(f.file, l);
     }
     const text = (lines.get(f.file) || [])[f.line - 1];

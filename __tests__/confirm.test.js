@@ -38,6 +38,7 @@ function fakeModel(root) {
   fs.writeFileSync(p, `const fs = require('fs');
 const prompt = process.argv.length > 2 ? process.argv[2] : fs.readFileSync(0, 'utf8');
 if (!prompt.includes('[1] stale-mention (high) docs/setup.md:2') || !prompt.includes('>     2 | Run scripts/old.sh first.')) { console.error('bad prompt'); process.exit(3); }
+if (process.env.NOT_IN_PROMPT && prompt.includes(process.env.NOT_IN_PROMPT)) { console.error('prompt holds text from outside the repo'); process.exit(4); }
 process.stdout.write(process.env.REPLY);
 `);
   return JSON.stringify(['node', p]);
@@ -99,6 +100,31 @@ test('a reply that leaves a finding unjudged is not trusted', () => {
     expect(out.dismissed).toEqual([]);
     expect(out.unconfirmed.map((u) => u.id)).toEqual([1, 2]);
   }
+});
+
+test('a file outside the repository, directly or through a tracked symlink, is neither shown to the model nor fixed', () => {
+  const outside = fs.mkdtempSync(path.join(TMP, 'deslop-outside-'));
+  dirs.push(outside);
+  const secret = 'SENTINEL-OUTSIDE-THE-REPO';
+  fs.writeFileSync(path.join(outside, 'secret.txt'), `${secret}\n`);
+  const root = workspace(files);
+  fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'docs', 'key.md'));
+  fs.symlinkSync(outside, path.join(root, 'linked'));
+  const escape = path.relative(root, path.join(outside, 'secret.txt'));
+  const rep = { scope: 'diff', items: [
+    report.items[0],
+    { check: 'local-path', severity: 'high', file: 'docs/key.md', line: 1, excerpt: path.join(outside, 'secret.txt'), message: 'points at a machine-local path' },
+    { check: 'local-path', severity: 'high', file: 'linked/secret.txt', line: 1, excerpt: 'x', message: 'points at a machine-local path' },
+    { check: 'local-path', severity: 'high', file: escape, line: 1, excerpt: 'x', message: 'points at a machine-local path' },
+  ] };
+  const fix = (file) => ({ file, line: file === 'docs/setup.md' ? 2 : 1, action: 'replace', old: file === 'docs/setup.md' ? 'scripts/old.sh' : secret, new: 'gone' });
+  const reply = { confirmed: [1, 2, 3, 4], dismissed: [], fixes: ['docs/setup.md', 'docs/key.md', 'linked/secret.txt', escape].map(fix) };
+  const r = confirm(root, JSON.stringify(reply), [`--cmd=${fakeModel(root)}`], { NOT_IN_PROMPT: secret }, rep);
+  const out = JSON.parse(r.stdout);
+  expect(out.error).toBeUndefined();
+  expect(out.findings.map((f) => f.id)).toEqual([1, 2, 3, 4]);
+  expect(out.fixes.map((f) => f.file)).toEqual(['docs/setup.md']);
+  expect(out.rejectedFixes.map((x) => `${x.fix.file}: ${x.why}`)).toEqual(['docs/key.md', 'linked/secret.txt', escape].map((f) => `${f}: not a file inside the repository (outside it or through a symlink)`));
 });
 
 test('with no model configured the findings are printed for the caller to judge', () => {
