@@ -70,6 +70,7 @@ const EXCLUDE = EXCLUDE_GLOBS.map((g) => `:(exclude,glob)${g}`);
 const SLOW_SEARCH_MS = 180000;
 let rgOk;
 function haveRg() {
+  if (process.env.DESLOP_NO_RG) return false; // force the git grep path (tests, debugging)
   if (rgOk === undefined) {
     const r = spawnSync('rg', ['--version'], { encoding: 'utf8' });
     rgOk = !r.error && r.status === 0;
@@ -114,7 +115,7 @@ function rgMany(root, tokens, tracked) {
 }
 
 // Fixed-string search for many tokens at once. Returns [{file, line, text}] for lines holding any token.
-function grepMany(root, rev, tokens, { pathspecs = [], tracked } = {}) {
+function grepMany(root, rev, tokens, { pathspecs = [], tracked, untracked = false } = {}) {
   if (!tokens.length) return [];
   if (!rev && !pathspecs.length && haveRg()) {
     const hits = rgMany(root, tokens, tracked);
@@ -122,6 +123,7 @@ function grepMany(root, rev, tokens, { pathspecs = [], tracked } = {}) {
   }
   const args = ['grep', '-n', '-I', '--no-color', '-F', '-z', '--full-name', '-f', '-'];
   if (rev) args.push(rev);
+  else if (untracked) args.push('--untracked');
   args.push('--', ...(pathspecs.length ? pathspecs : ['.']), ...EXCLUDE);
   const r = spawnSync('git', ['-C', root, ...args], { input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX, timeout: SLOW_SEARCH_MS });
   if (r.error && r.error.code === 'ETIMEDOUT') {

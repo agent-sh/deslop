@@ -15,7 +15,8 @@ function buildContext(root, opts) {
   // Searching a checked-out HEAD reads the work tree (threaded, page cache); any other revision
   // has to decompress every blob, which is slow on large repos.
   const grepRev = ctx.head && ctx.head !== 'HEAD' ? ctx.head : null;
-  ctx.grep = (tokens, o = {}) => grepMany(root, grepRev, tokens, { ...o, tracked: ctx.headFiles });
+  // In work-tree mode untracked files are part of the change, so the search covers them too.
+  ctx.grep = (tokens, o = {}) => grepMany(root, grepRev, tokens, { ...o, tracked: ctx.headFiles, untracked: !ctx.head });
   ctx.dirs = new Set();
   for (const f of ctx.headFiles) {
     const parts = f.split('/');

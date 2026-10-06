@@ -21,6 +21,10 @@ function run(bin, args, input) {
 
 const RUFF_RULES = 'F401,F811,F821,F841,F632,B006,B011,B017,B018,E711,E712,PLE';
 
+// .json files that the tools reading them parse as JSONC (comments, trailing commas). Any
+// other .json is read with JSON.parse somewhere, so it stays strict.
+const JSONC = /(^|\/)(devcontainer|\.devcontainer|tsconfig[^/]*|jsconfig[^/]*|\.eslintrc|turbo|biome|deno|\.swcrc|api-extractor|typedoc|language-configuration)\.json$|(^|\/)\.vscode\/[^/]+\.json$|(^|\/)\.devcontainer\/[^/]+\.json$/;
+
 function parsesAsJsonc(text) {
   let out = '';
   let inStr = false;
@@ -74,7 +78,7 @@ module.exports = {
       // trailing commas are fine there. Test fixtures may be invalid on purpose.
       if (path.extname(f.path) === '.json' && f.kind !== 'test') {
         try { JSON.parse(content); } catch (e) {
-          if (!parsesAsJsonc(content)) {
+          if (!(JSONC.test(f.path) && parsesAsJsonc(content))) {
             items.push({ check: 'broken-file', severity: 'high', file: f.path, line: 1, excerpt: '', message: `does not parse as JSON: ${e.message.slice(0, 120)}` });
           }
         }

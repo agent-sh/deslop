@@ -2,7 +2,9 @@
 // Text defects current models leave: merge residue, review provenance in code comments,
 // em dashes where the house style bans them, lines written twice, doc comments split from
 // their item, and PR text whose scope claims contradict the diff.
-const { lang, commentOf, SKIP_KINDS, TEXT_KINDS } = require('../files');
+const { lang, commentOf, kind, SKIP_KINDS, TEXT_KINDS } = require('../files');
+const { git } = require('../git');
+const { parseDiff } = require('../diff');
 
 const CONFLICT = /^(<{7}(\s|$)|>{7}(\s|$)|\|{7}(\s|$)|={7}$)/;
 // History-shaped phrases only: review tooling describes its own job with "code review" and
@@ -104,14 +106,18 @@ module.exports = {
     const prText = stripBots(ctx.prText || '');
     const claimText = [prText, ...(ctx.commits || []).map((c) => c.message)].filter(Boolean).join('\n');
     if (claimText && ctx.scope === 'diff') {
-      const byPath = new Map(ctx.files.map((f) => [f.path, f]));
       const codeFiles = ctx.files.filter((f) => f.kind === 'code' && !commentOnly(ctx, f));
       const testFiles = ctx.files.filter((f) => f.kind === 'test');
       // The PR body speaks for the whole branch; a commit message only for its own commit.
       const sources = [{ text: prText, code: codeFiles, tests: testFiles, who: 'the diff' }];
       for (const c of ctx.commits || []) {
-        const own = c.files.map((p) => byPath.get(p)).filter(Boolean);
-        sources.push({ text: c.message, code: own.filter((f) => codeFiles.includes(f)), tests: own.filter((f) => f.kind === 'test'), who: `commit ${c.sha.slice(0, 7)}` });
+        // Judge a commit by its own hunks: a comment-only commit on a file another commit
+        // rewrote is still comment-only. Only commits that make a claim need their diff.
+        if (!SCOPE_CLAIM.test(c.message)) continue;
+        const own = parseDiff(git(ctx.root, ['-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--unified=0', '-M', `${c.sha}^`, c.sha], { allowFail: true }))
+          .filter((f) => !f.binary)
+          .map((f) => ({ ...f, kind: kind(f.path) }));
+        sources.push({ text: c.message, code: own.filter((f) => f.kind === 'code' && !commentOnly(ctx, f)), tests: own.filter((f) => f.kind === 'test'), who: `commit ${c.sha.slice(0, 7)}` });
       }
       for (const src of sources) {
         for (const line of src.text.split('\n')) {

@@ -189,6 +189,13 @@ describe('comments and text', () => {
     expect(detect(root).some((i) => i.check === 'scope-claim')).toBe(false);
   });
 
+  test('a comment-only commit on a file an earlier commit changed is not a false docs-only claim', () => {
+    const root = repo({ 'a.js': 'const x = 1;\n' }, { 'a.js': 'const x = 2;\n' }, { message: 'feat: change x' });
+    write(root, { 'a.js': '// x is the retry count\nconst x = 2;\n' });
+    execFileSync('git', ['-C', root, 'commit', '-q', '-am', 'docs-only: explain x']);
+    expect(detect(root).some((i) => i.check === 'scope-claim')).toBe(false);
+  });
+
   test('conflict markers and an em dash; the em dash can be turned off', () => {
     const root = repo(
       { 'README.md': '# x\n' },
@@ -312,9 +319,9 @@ describe('companions', () => {
 
 describe('files', () => {
   test('JSONC config is not a broken file; invalid JSON is', () => {
-    const root = repo({ 'README.md': 'x\n' }, { '.devcontainer/devcontainer.json': '{\n  // image\n  "image": "x",\n}\n', 'config/app.json': '{"a": }\n' });
-    const broken = detect(root).filter((i) => i.check === 'broken-file').map((i) => i.file);
-    expect(broken).toEqual(['config/app.json']);
+    const root = repo({ 'README.md': 'x\n' }, { '.devcontainer/devcontainer.json': '{\n  // image\n  "image": "x",\n}\n', 'tsconfig.json': '{ /* strict */ "compilerOptions": {} }\n', 'config/app.json': '{"a": }\n', 'package.json': '{"name": "x",}\n' });
+    const broken = detect(root).filter((i) => i.check === 'broken-file').map((i) => i.file).sort();
+    expect(broken).toEqual(['config/app.json', 'package.json']);
   });
 });
 
@@ -336,6 +343,13 @@ describe('scopes and inputs', () => {
     const items = detect(root, '--worktree');
     expect(items.some((i) => i.check === 'missing-path')).toBe(false);
     expect(items.some((i) => i.check === 'review-provenance' && i.file === 'tools/new.sh')).toBe(true);
+  });
+
+  test('--worktree without ripgrep still sees calls inside untracked files', () => {
+    const root = repo({ 'README.md': '# x\n' }, {}, { commit: false });
+    write(root, { 'tools/calc.py': 'def compute_result():\n    return 1\n\nprint(compute_result())\n' });
+    const r = spawnSync('node', [DETECT, root, '--base=main', '--json', '--worktree'], { encoding: 'utf8', env: { ...process.env, DESLOP_NO_RG: '1' } });
+    expect(JSON.parse(r.stdout).items.filter((i) => i.check === 'no-caller' && i.message.includes('compute_result'))).toEqual([]);
   });
 
   test('repo scope narrowed to a path', () => {
