@@ -222,6 +222,30 @@ describe('unwired additions and secrets', () => {
   });
 });
 
+describe('companions', () => {
+  test('a declared pair where only one side changed', () => {
+    const root = repo({ 'rules.json': '{}\n', 'docs/rules.md': '# Rules\n' }, { 'rules.json': '{"a": 1}\n' });
+    write(root, { '.deslop.json': JSON.stringify({ together: [{ when: 'rules.json', also: 'docs/rules.md', message: 'rules.json and docs/rules.md change together' }] }) });
+    const c = detect(root).find((i) => i.check === 'missing-companion');
+    expect(c.message).toBe('rules.json and docs/rules.md change together');
+  });
+
+  test('a file that history always changes with the edited one', () => {
+    const root = repo({ 'src/plan.py': 'x = 0\n', 'docs/plan.md': 'x is 0\n' }, {}, { commit: false });
+    const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'pipe' });
+    git('checkout', '-q', 'main');
+    for (let i = 1; i <= 6; i++) {
+      write(root, { 'src/plan.py': `x = ${i}\n`, 'docs/plan.md': `x is ${i}\n` });
+      git('commit', '-q', '-am', `step ${i}`);
+    }
+    git('checkout', '-q', '-B', 'feature');
+    write(root, { 'src/plan.py': 'x = 7\n' });
+    git('commit', '-q', '-am', 'only code');
+    const c = detect(root).find((i) => i.check === 'missing-companion');
+    expect(c.file).toBe('docs/plan.md');
+  });
+});
+
 describe('scopes and inputs', () => {
   test('clean change reports nothing', () => {
     const root = repo({ 'a.js': 'module.exports = 1;\n' }, { 'a.js': 'module.exports = 2;\n' });

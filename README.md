@@ -50,6 +50,7 @@ gh pr view --json body -q .body | node scripts/detect.js . --pr-body=-
 | `displaced-doc-comment`, `duplicate-line` | Code inserted between a doc comment and its item; lines written twice |
 | `no-caller`, `unread-setting` | Added code nothing calls, settings nothing reads |
 | `dropped-rule` | Rules and reasons a doc or prompt rewrite removed |
+| `missing-companion` | Files declared or historically changed together, where the change edited one side |
 | `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON |
 | `lint` | shellcheck, ruff and actionlint on added lines, when installed |
 | `em-dash` | House style; off with `.deslop.json` |
@@ -61,7 +62,13 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 `.deslop.json` at the repository root:
 
 ```json
-{ "ignore": ["vendor/**", "fixtures/**"], "disable": ["em-dash"], "style": { "emDash": false } }
+{
+  "ignore": ["vendor/**", "fixtures/**"],
+  "disable": ["lint"],
+  "style": { "emDash": false },
+  "together": [{ "when": "rules.json", "also": "docs/RULES.md", "message": "rule changes need the rules doc" }],
+  "mineCochange": true
+}
 ```
 
 ## Requirements

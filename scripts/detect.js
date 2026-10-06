@@ -28,7 +28,8 @@ Output
   --json              JSON instead of text
   --max=N             findings to print (default 40)
 
-Config: .deslop.json at the repo root, {"ignore": [globs], "disable": [check ids], "style": {"emDash": false}}.
+Config: .deslop.json at the repo root: {"ignore": [globs], "disable": [check ids], "style": {"emDash": false},
+"together": [{"when": glob, "also": glob, "message": text}], "mineCochange": false}.
 Exit status: 0 when the scan ran (findings or not), 1 on error.`;
 
 function main(argv) {
@@ -68,6 +69,8 @@ function main(argv) {
     opts.ignore = cfg.ignore || [];
     opts.disable = cfg.disable || [];
     opts.style = cfg.style || {};
+    opts.together = cfg.together || [];
+    if (cfg.mineCochange === false) opts.mineCochange = false;
   }
   const r = detect(root, opts);
   console.log(json ? JSON.stringify(r, null, 2) : formatText(r));

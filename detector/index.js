@@ -2,10 +2,10 @@
 // Runs the checks over a context and ranks what they report.
 const { buildContext } = require('./context');
 
-const CHECKS = ['drift', 'refs', 'anchors', 'unwired', 'text', 'tests', 'rewrite', 'secrets', 'tools'].map((id) => require(`./checks/${id}`));
+const CHECKS = ['drift', 'refs', 'anchors', 'unwired', 'text', 'tests', 'rewrite', 'secrets', 'tools', 'cochange'].map((id) => require(`./checks/${id}`));
 
 // Order inside a severity: what most often turned out real in the evaluation set first.
-const PRIORITY = ['secret', 'merge-residue', 'broken-file', 'local-path', 'stale-mention', 'missing-path', 'broken-anchor', 'scope-claim', 'displaced-doc-comment', 'test-cannot-fail', 'review-provenance', 'duplicate-line', 'no-caller', 'count-mismatch', 'unread-setting', 'test-swallows-failure', 'lint', 'dropped-rule', 'em-dash'];
+const PRIORITY = ['secret', 'merge-residue', 'broken-file', 'local-path', 'stale-mention', 'missing-path', 'broken-anchor', 'scope-claim', 'displaced-doc-comment', 'test-cannot-fail', 'review-provenance', 'duplicate-line', 'no-caller', 'count-mismatch', 'unread-setting', 'test-swallows-failure', 'lint', 'dropped-rule', 'missing-companion', 'em-dash'];
 
 function globToRe(g) {
   const esc = g.replace(/[.+^$()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '.*');

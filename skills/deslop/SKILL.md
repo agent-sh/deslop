@@ -32,6 +32,7 @@ Models no longer leave debug prints and TODO stubs. They leave text that was tru
 | `duplicate-line` | A comment or prose line written twice. | |
 | `no-caller`, `unread-setting` | Something added that nothing calls or reads. | Entry points, framework hooks and public API are wired from outside. |
 | `dropped-rule` | A doc or prompt rewrite removed a rule or reason whose words appear nowhere in the new text. | Was dropping it intended? Current models shorten well but lose exceptions. |
+| `missing-companion` | A file the repo declares (`together` in `.deslop.json`) or history shows changing with an edited file was left alone. | Does it describe or mirror what changed? |
 | `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON. | |
 | `lint` | shellcheck, ruff or actionlint, on added lines, when installed. | |
 | `em-dash` | House style. Turn it off with `{"style": {"emDash": false}}` in `.deslop.json`. | |

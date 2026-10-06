@@ -10,7 +10,9 @@ const PROMPT = /(^|\/)(SKILL|AGENTS|CLAUDE|GEMINI)\.md$|(^|\/)(agents|commands|s
 const CI = /^\.github\/workflows\/|(^|\/)\.gitlab-ci\.yml$|(^|\/)\.circleci\//;
 const CONFIG = /\.(json|jsonc|ya?ml|toml|ini|cfg|conf|env|properties)$|(^|\/)[^/]*\.env(\.[^/]+)?$|\.template$|(^|\/)(Dockerfile|Makefile|\.gitignore|\.gitattributes)$/;
 // Recorded output (logs, receipts, results files) is evidence, not something to keep in sync.
-const DATA = /\.(log|jsonl|ndjson|csv|tsv|out|err|sarif|har|pcap|ipynb)$|(^|\/)(receipts?|logs?|evidence|raw|captures?)\/|(^|\/)[A-Z0-9_-]+\.json$|(^|\/)[^/]*(results?|receipts?|reports?|outputs?|metrics|bench(mark)?s?|traces?|mutants?|raw)[^/]*\.json$/i;
+const DATA = /\.(log|jsonl|ndjson|csv|tsv|out|err|sarif|har|pcap|ipynb)$|(^|\/)(receipts?|logs?|evidence|raw|captures?)\/|(^|\/)[^/]*(results?|receipts?|reports?|outputs?|metrics|bench(mark)?s?|traces?|mutants?|raw)[^/]*\.json$/i;
+// RESULTS.json, PARTIAL.json: an upper-case name marks a written record, not a config file.
+const DATA_UPPER = /(^|\/)(?=[^/]*[A-Z])[A-Z0-9_-]+\.json$/;
 const CHANGELOG = /(^|\/)(CHANGELOG|CHANGES|HISTORY|RELEASE[-_]NOTES)[^/]*$/i;
 const CODE_EXT = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.rs', '.go', '.java', '.kt', '.c', '.h', '.cc', '.cpp', '.hpp', '.cu', '.cuh', '.rb', '.php', '.swift', '.sh', '.bash', '.zsh', '.ps1', '.cmd', '.bat', '.lua', '.zig', '.ex', '.exs', '.astro', '.vue', '.svelte', '.sql', '.cs', '.scala', '.adb', '.ads']);
 
@@ -18,7 +20,7 @@ function kind(p) {
   if (LOCK.test(p)) return 'lock';
   if (VENDOR.test(p)) return 'vendor';
   if (CHANGELOG.test(p)) return 'changelog';
-  if (DATA.test(p)) return 'data';
+  if (DATA.test(p) || DATA_UPPER.test(p)) return 'data';
   if (CI.test(p)) return 'ci';
   if (PROMPT.test(p)) return 'prompt';
   if (TEST.test(p)) return 'test';
