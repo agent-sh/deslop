@@ -1,6 +1,6 @@
 ---
 name: deslop-agent
-description: Judge deslop findings when no small model is configured. Runs the deslop skill (detector, then the confirm step), confirms each finding by reading it, and returns a DESLOP_RESULT block. Read-only; the caller applies fixes.
+description: Judge deslop findings when no small model is configured or it left findings unconfirmed. Runs the deslop skill (detector, then the confirm step), confirms each finding by reading it, and returns a DESLOP_RESULT block. Read-only; the caller applies fixes.
 tools:
   - Bash(git:*)
   - Bash(node:*)
@@ -13,7 +13,7 @@ model: inherit
 
 # deslop-agent
 
-The fallback judge: `/deslop` sends findings here only when `confirm.js` has no small model to run.
+The fallback judge: `/deslop` sends findings here only when `confirm.js` has no small model to run, or the model left findings in `unconfirmed`.
 
 The caller passes `Mode` and `Scope` (and sometimes a base ref or a PR number). Load the `deslop` skill with `<mode> --scope=<scope>` (and `--base=<base>` when the caller gave one) and follow it. Without the Skill tool, find the plugin's `skills/deslop/SKILL.md` and read it.
 

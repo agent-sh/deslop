@@ -55,8 +55,8 @@ node scripts/detect.js . --json | node scripts/confirm.js   # findings confirmed
 | `dropped-rule` | Rules and reasons a doc or prompt rewrite removed |
 | `missing-companion` | Files declared or historically changed together, where the change edited one side |
 | `changelog-missing` | A user-visible change (CLI flag, env var, command, skill or agent file, package bin, or a `feat:`/`fix:`/`perf:` commit over code) with no entry under `Unreleased` |
-| `doc-example-stale` | A docs example passing a flag the repo's own CLI or slash command does not define, or invoking a slash command the change deleted |
-| `version-mismatch` | A package version moved in one manifest and not in another manifest of the same package (plugin.json, marketplace.json, Cargo.toml, pyproject.toml), or a new docs line pinning another version |
+| `doc-example-stale` | A docs example passing a flag the repo's own CLI or slash command does not define, or invoking a slash command the change deleted. `--help` and `--version` come with every parser library and are not checked; a flag given to a command that hands its arguments to another program is REVIEW, not HIGH |
+| `version-mismatch` | A package version moved in one manifest and not in another manifest of the same package (plugin.json, marketplace.json, Cargo.toml, pyproject.toml; `@one/kit` and `@two/kit` are different packages), or a new docs line pinning another version |
 | `duplicate-code` | Added code of 60 tokens and 6 distinct lines or more that already exists elsewhere in the repo, or twice in the change |
 | `complexity` | A function the change pushed past 80 lines, 5 levels of control-flow nesting or 6 parameters (JS/TS, Python, Rust, Go, shell) |
 | `agent-config` | agnix errors in instruction files, skills, agents, commands, plugin manifests, hooks and MCP configs the change touched, when agnix is installed |
@@ -64,7 +64,7 @@ node scripts/detect.js . --json | node scripts/confirm.js   # findings confirmed
 | `lint` | shellcheck, ruff and actionlint on added lines, when installed |
 | `em-dash` | House style; off with `.deslop.json` |
 
-`duplicate-code` and `complexity` skip tests, generated files and snapshot or dated record folders. With `--scope=repo` they audit the whole repository instead of a change.
+`duplicate-code` and `complexity` skip tests, generated files and snapshot or dated record folders; the doc sync checks skip those folders too (`versioned_docs/`, `archive/`), since they keep old flags and versions on purpose. With `--scope=repo` they audit the whole repository instead of a change.
 
 Logic errors, edge cases and races need a reviewer, so deslop does not guess at them.
 
@@ -72,7 +72,7 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 
 `scripts/confirm.js` sends each finding, with the flagged line and two lines around it, to a small model and keeps only what it confirms. Fixes come back in `next-task:simple-fixer`'s format and are checked against the file before they are returned. It runs, in this order:
 
-1. `--cmd="..."`: a shell command; `{prompt}` in it is replaced by the prompt, otherwise the prompt goes to stdin.
+1. `--cmd="..."`: a shell command; `{prompt}` in it, bare or inside `"..."` or `'...'`, becomes the prompt as one argument, otherwise the prompt goes to stdin. A `{prompt}` inside `$(...)`, backticks or a here-document is refused.
 2. `DESLOP_SMALL_CMD`: the same, from the environment.
 3. The `small` role in [gishra](https://github.com/agent-sh/gishra)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
 
@@ -87,11 +87,11 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 | `opencode` | `opencode run <prompt> -m <model>` (`--variant <effort>`) |
 | `agy` | `agy -p <prompt> --model <model> --effort <effort>` |
 | `pi` | `pi -p <prompt> --model <model> --provider <provider> --thinking <effort>` |
-| `command` | the `command` array, with `{prompt}` replaced |
+| `command` | the `command` array, with an element `{prompt}` (or `--flag={prompt}`) replaced by the prompt |
 
 Options missing from the role are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
 
-With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape is discarded: every finding comes back unconfirmed with an `error`.
+With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
 
 ## Configuration
 

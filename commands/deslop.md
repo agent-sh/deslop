@@ -23,7 +23,7 @@ If the scope is a path that does not exist, reply `Path not found: <path>` and s
 
 Load the `deslop` skill with the same arguments and run its Run section here: the detector, then `confirm.js`, which hands the findings to the project's small model.
 
-- If `confirm.js` printed a result, that JSON is the `DESLOP_RESULT`. If it has an `"error"`, its `unconfirmed` findings still need judging: treat them as in the next point.
+- If `confirm.js` printed a result, that JSON is the `DESLOP_RESULT`. If its `unconfirmed` list is not empty (it then carries an `"error"`), those findings still need judging: treat them as in the next point.
 - If it printed `deslop-confirm: no small model configured`, spawn `deslop:deslop-agent` to judge them:
 
 ```
@@ -39,7 +39,7 @@ Read the JSON between `=== DESLOP_RESULT ===` and `=== END_RESULT ===` (or `conf
 
 ## Report mode
 
-List each confirmed finding as `file:line - message`, grouped by check, then one line: `N reported, M confirmed, K dismissed`. If nothing was confirmed, say the change is clean. Mention `/deslop apply` only when `fixes` is not empty.
+List each confirmed finding as `file:line - message`, grouped by check, then one line: `N reported, M confirmed, K dismissed`. Say the change is clean only when nothing was confirmed and every reported finding was judged; a finding still in `unconfirmed` is listed as unjudged, never counted as clean. Mention `/deslop apply` only when `fixes` is not empty.
 
 ## Apply mode
 

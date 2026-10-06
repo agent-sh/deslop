@@ -441,6 +441,51 @@ describe('doc sync', () => {
     expect(items[0].fix).toEqual({ fixType: 'replace-token', from: '1.0.0', to: '1.1.0' });
   });
 
+  test('packages under different npm scopes are different packages, and a plugin manifest is a mirror only when the bare name is unambiguous', () => {
+    const pkg = (name, version) => `{\n  "name": "${name}",\n  "version": "${version}"\n}\n`;
+    const two = repo(
+      { 'a/package.json': pkg('@one/kit', '1.0.0'), 'b/package.json': pkg('@two/kit', '1.0.0'), '.claude-plugin/plugin.json': pkg('kit', '1.0.0') },
+      { 'a/package.json': pkg('@one/kit', '1.1.0') },
+    );
+    expect(detect(two).filter((i) => i.check === 'version-mismatch')).toEqual([]);
+    const one = repo(
+      { 'a/package.json': pkg('@one/kit', '1.0.0'), 'c/package.json': pkg('@one/other', '1.0.0'), '.claude-plugin/plugin.json': pkg('kit', '1.0.0') },
+      { 'a/package.json': pkg('@one/kit', '1.1.0') },
+    );
+    expect(detect(one).filter((i) => i.check === 'version-mismatch').map((i) => i.file)).toEqual(['.claude-plugin/plugin.json']);
+  });
+
+  test('flags a parser library provides are not stale, and a flag a command hands on is REVIEW, not HIGH', () => {
+    const root = repo(
+      {
+        'scripts/cli.py': 'import argparse\n\nparser = argparse.ArgumentParser()\nparser.add_argument("--count")\nargs = parser.parse_args()\n',
+        'scripts/wrap.sh': '#!/bin/sh\nexec git -C "$HOME" "$@"\n',
+        'package.json': '{"name": "tool", "version": "1.0.0", "bin": {"tool": "bin/tool.js"}}\n',
+        'bin/tool.js': "const { spawnSync } = require('child_process');\nspawnSync('git', process.argv.slice(2), { stdio: 'inherit' });\n",
+        'README.md': '# tool\n',
+      },
+      { 'README.md': '# tool\n\n```\npython scripts/cli.py --help\npython scripts/cli.py --dry-plan\nsh scripts/wrap.sh --force-with-lease\ntool --version\ntool --amend-all\n```\n' },
+    );
+    const stale = detect(root).filter((i) => i.check === 'doc-example-stale').map((i) => `${i.line}:${i.token}:${i.severity}`);
+    expect(stale).toEqual(['5:--dry-plan:high', '6:--force-with-lease:review', '8:--amend-all:review']);
+  });
+
+  test('versioned and archived docs and manifests keep old flags and versions', () => {
+    const pkg = (version) => `{\n  "name": "kit",\n  "version": "${version}",\n  "bin": {"kit": "cli.js"}\n}\n`;
+    const lines = 'Run `kit --old-mode`.\n\nnpm i kit@1.0.0\n';
+    const docs = repo(
+      { 'package.json': pkg('1.1.0'), 'cli.js': "if (args.includes('--new-mode')) run();\n", 'CHANGELOG.md': changelog },
+      { 'versioned_docs/v1.0/usage.md': lines, 'docs/archive/2024/usage.md': lines, 'versioned_docs/v1.0/commands/old.md': '# old\n', 'docs/usage.md': lines },
+    );
+    const items = detect(docs).filter((i) => ['doc-example-stale', 'version-mismatch', 'changelog-missing'].includes(i.check));
+    expect(items.map((i) => `${i.check}@${i.file}:${i.line}`).sort()).toEqual(['doc-example-stale@docs/usage.md:1', 'version-mismatch@docs/usage.md:3']);
+    const manifests = repo(
+      { 'package.json': pkg('1.0.0'), 'archive/v1/package.json': pkg('1.0.0'), '.claude-plugin/plugin.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n' },
+      { 'package.json': pkg('1.1.0') },
+    );
+    expect(detect(manifests).filter((i) => i.check === 'version-mismatch').map((i) => i.file)).toEqual(['.claude-plugin/plugin.json']);
+  });
+
   test('a new install line pins an old version of our package; the current one and other packages pass', () => {
     const root = repo(
       { 'package.json': '{\n  "name": "kit",\n  "version": "2.0.0"\n}\n', 'README.md': '# kit\n' },
@@ -480,6 +525,33 @@ describe('code shape', () => {
     const items = detect(root).filter((i) => i.check === 'duplicate-code');
     expect(items.map((i) => i.file)).toEqual(['src/score.js']);
     expect(items[0].message).toContain('lines 2-13 repeat src/rank.js:2-13');
+  });
+
+  test('candidate files over the size limit are never read, and a copy in a small file is still found', () => {
+    // In process, to see which blobs the duplicate check loads; the other checks are off so their
+    // own reads do not count.
+    const { BlobReader } = require('../detector/git');
+    const { detect: detectIn, CHECKS } = require('../detector');
+    const big = `${block('rankBig', 'big')}\n` + '// a long file the scan must not load\n'.repeat(30000);
+    const root = repo(
+      { 'src/rank.js': `${block('rankItems', 'rank')}\nmodule.exports = { rankItems };\n`, 'src/big1.js': big, 'src/big2.js': big },
+      { 'src/score.js': `${block('scoreItems', 'score')}\nmodule.exports = { scoreItems };\n` },
+    );
+    const loaded = new Set();
+    const read = BlobReader.prototype.read;
+    const readMany = BlobReader.prototype.readMany;
+    const spies = [
+      jest.spyOn(BlobReader.prototype, 'read').mockImplementation(function (p) { loaded.add(p); return read.call(this, p); }),
+      jest.spyOn(BlobReader.prototype, 'readMany').mockImplementation(function (ps) { for (const p of ps) loaded.add(p); return readMany.call(this, ps); }),
+    ];
+    try {
+      const r = detectIn(root, { scope: 'diff', base: 'main', paths: [], disable: CHECKS.map((c) => c.id).filter((id) => id !== 'duplicates') });
+      expect(r.items.map((i) => `${i.file}:${i.token}`)).toEqual(['src/score.js:src/rank.js:2']);
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+    expect(loaded.has('src/rank.js')).toBe(true);
+    expect(loaded.has('src/big1.js') || loaded.has('src/big2.js')).toBe(false);
   });
 
   test('the same block added twice in one change is reported once, on the later copy', () => {

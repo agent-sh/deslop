@@ -7,8 +7,10 @@
 //   nothing defines, or a slash command whose file this change deleted.
 // - version-mismatch: the change moved a package's version in one manifest and left another
 //   manifest of the same package at the old version, or a new docs line pins another version.
+// Snapshot and dated record folders (versioned_docs/, archive/) keep old flags and versions on
+// purpose, so they are neither read as docs nor counted as manifests.
 const path = require('path');
-const { lang, SKIP_KINDS, TEXT_KINDS, ENV_READ, OPTION_DEF, FLAG_NAME } = require('../files');
+const { lang, SKIP_KINDS, TEXT_KINDS, ENV_READ, OPTION_DEF, FLAG_NAME, SNAPSHOT } = require('../files');
 
 const CHANGELOG_NAMES = ['CHANGELOG.md', 'CHANGES.md', 'HISTORY.md', 'changelog.md'];
 const UNRELEASED = /^#{2,3}\s*\[?unreleased\]?/im;
@@ -45,13 +47,16 @@ function envsOn(lines) {
   return out;
 }
 
-function binsOf(text) {
+// A package.json's commands and the file each runs. A string "bin" is named after the package
+// without its scope, as npm installs it.
+function binEntries(text) {
   try {
     const pkg = JSON.parse(text);
-    if (typeof pkg.bin === 'string') return new Set([String(pkg.name || '').replace(/^@[^/]+\//, '')]);
-    return new Set(Object.keys(pkg.bin || {}));
-  } catch { return new Set(); }
+    if (typeof pkg.bin === 'string') return new Map([[String(pkg.name || '').replace(/^@[^/]+\//, ''), pkg.bin]]);
+    return new Map(Object.entries(pkg.bin || {}).map(([k, v]) => [k, typeof v === 'string' ? v : null]));
+  } catch { return new Map(); }
 }
+const binsOf = (text) => new Set(binEntries(text).keys());
 
 function userVisibleChanges(ctx) {
   const out = [];
@@ -59,7 +64,7 @@ function userVisibleChanges(ctx) {
   const tally = { addedFlags: new Map(), removedFlags: new Map(), addedEnv: new Map(), removedEnv: new Map() };
   const merge = (into, from, file) => { for (const [k, line] of from) if (!into.has(k)) into.set(k, { file, line }); };
   for (const f of ctx.files) {
-    if (f.kind !== 'code' || !lang(f.path)) continue;
+    if (f.kind !== 'code' || !lang(f.path) || SNAPSHOT.test(f.path)) continue;
     merge(tally.addedFlags, flagsOn(f.added), f.path);
     merge(tally.removedFlags, flagsOn(f.removed), f.oldPath);
     merge(tally.addedEnv, envsOn(f.added), f.path);
@@ -70,6 +75,7 @@ function userVisibleChanges(ctx) {
   for (const [k, at] of tally.addedEnv) if (!tally.removedEnv.has(k)) out.push({ file: at.file, line: at.line, what: `reads \`${k}\`` });
   for (const [k, at] of tally.removedEnv) if (!tally.addedEnv.has(k)) out.push({ file: at.file, line: 0, what: `stops reading \`${k}\`` });
   for (const f of ctx.files) {
+    if (SNAPSHOT.test(f.path) || (f.oldPath && SNAPSHOT.test(f.oldPath))) continue;
     if (SURFACE.test(f.path) && f.status === 'A') out.push({ file: f.path, line: 1, what: `adds ${f.path}` });
     if (f.oldPath && SURFACE.test(f.oldPath) && f.status === 'D') out.push({ file: f.oldPath, line: 0, what: `removes ${f.oldPath}` });
     if (path.posix.basename(f.path) === 'package.json' && f.status === 'M' && ctx.baseReader) {
@@ -115,7 +121,7 @@ function changelogMissing(ctx) {
   const announced = (ctx.commits || []).map((c) => c.message.split('\n')[0]).filter((sub) => USER_VISIBLE_COMMIT.test(sub));
   if (announced.length) {
     for (const f of ctx.files) {
-      if (f.kind !== 'code' || !(f.added.length || f.removed.length)) continue;
+      if (f.kind !== 'code' || !(f.added.length || f.removed.length) || SNAPSHOT.test(f.path)) continue;
       const log = nearestChangelog(ctx, f.path);
       if (log && !byLog.has(log)) add(log, { file: f.path, line: 0, what: `commits "${announced[0].slice(0, 60)}"`, commit: true });
     }
@@ -142,36 +148,74 @@ function changelogMissing(ctx) {
 
 // --- doc-example-stale -------------------------------------------------------------------
 
-// Commands this repo ships: package bins, Cargo binaries, Python console scripts, Go cmd/
-// directories and plugin slash commands.
+// Commands this repo ships, each with the file it runs when the manifest says (null when not):
+// package bins, Cargo binaries, Python console scripts, Go cmd/ directories, and plugin slash
+// commands.
 function ownCommands(ctx) {
-  const bins = new Set();
-  const manifests = [...ctx.headFiles].filter((p) => /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml)$/.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)));
+  const bins = new Map();
+  const add = (b, entry) => { if (b && b.length >= 3 && !bins.get(b)) bins.set(b, entry && ctx.headFiles.has(entry) ? entry : null); };
+  const manifests = [...ctx.headFiles].filter((p) => /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml)$/.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)) && !SNAPSHOT.test(p));
   const texts = ctx.headReader.readMany ? ctx.headReader.readMany(manifests) : manifests.map((p) => ctx.headReader.read(p));
   manifests.forEach((p, i) => {
     const text = texts[i];
     if (!text) return;
-    if (p.endsWith('package.json')) { for (const b of binsOf(text)) if (b) bins.add(b); return; }
     const dir = path.posix.dirname(p) === '.' ? '' : path.posix.dirname(p) + '/';
+    if (p.endsWith('package.json')) { for (const [b, file] of binEntries(text)) add(b, file && path.posix.normalize(dir + file)); return; }
     if (p.endsWith('Cargo.toml')) {
-      for (const m of text.matchAll(/\[\[bin\]\][^[]*?\bname\s*=\s*"([^"]+)"/g)) bins.add(m[1]);
+      for (const m of text.matchAll(/\[\[bin\]\]([^[]*)/g)) {
+        const name = /\bname\s*=\s*"([^"]+)"/.exec(m[1]);
+        const file = /\bpath\s*=\s*"([^"]+)"/.exec(m[1]);
+        if (name) add(name[1], file ? path.posix.normalize(dir + file[1]) : `${dir}src/bin/${name[1]}.rs`);
+      }
       const pkg = /\[package\][^[]*?\bname\s*=\s*"([^"]+)"/.exec(text);
-      if (pkg && ctx.headFiles.has(`${dir}src/main.rs`)) bins.add(pkg[1]);
+      if (pkg && ctx.headFiles.has(`${dir}src/main.rs`)) add(pkg[1], `${dir}src/main.rs`);
       return;
     }
     const scripts = /\[(?:project\.scripts|tool\.poetry\.scripts)\]([^[]*)/g;
-    for (const m of text.matchAll(scripts)) for (const k of m[1].matchAll(/^\s*["']?([A-Za-z0-9_.-]+)["']?\s*=/gm)) bins.add(k[1]);
+    for (const m of text.matchAll(scripts)) {
+      for (const k of m[1].matchAll(/^\s*["']?([A-Za-z0-9_.-]+)["']?\s*=\s*(?:["']([\w.]+)(?::[\w.]+)?["'])?/gm)) {
+        const mod = (k[2] || '').replace(/\./g, '/');
+        add(k[1], mod && [`${mod}.py`, `src/${mod}.py`, `${mod}/__init__.py`, `src/${mod}/__init__.py`].map((f) => dir + f).find((f) => ctx.headFiles.has(f)));
+      }
+    }
   });
   for (const p of ctx.headFiles) {
     const m = /(^|\/)cmd\/([^/]+)\/main\.go$/.exec(p);
-    if (m) bins.add(m[2]);
+    if (m && !SNAPSHOT.test(p)) add(m[2], p);
   }
   const slash = new Set();
   for (const p of ctx.headFiles) {
     const m = /(^|\/)commands\/([a-z0-9][\w-]*)\.md$/.exec(p);
-    if (m) slash.add(m[2]);
+    if (m && !SNAPSHOT.test(p)) slash.add(m[2]);
   }
-  return { bins: [...bins].filter((b) => b.length >= 3), slash };
+  return { bins, slash };
+}
+
+// Flags every common parser library (argparse, click, commander, yargs, clap, cobra, Go's flag)
+// answers without the program spelling them.
+const BUILTIN_FLAGS = new Set(['--help', '--version']);
+// Parser settings that keep unknown flags for another program instead of rejecting them.
+const PASS_THROUGH = /\b(parse_known_args|REMAINDER|ignore_unknown_options|allow_extra_args|allowUnknownOption|passThroughOptions|unknown-options-as-args|halt-at-non-option|trailing_var_arg|allow_hyphen_values|allow_external_subcommands|DisableFlagParsing|UnknownFlags)\b/;
+const RAW_ARGS = /process\.argv\.slice\(|sys\.argv\[1:\]|os\.Args\[1:\]|env::args(_os)?\(\)\.skip\(/;
+const SPAWNS = /\b(spawn|spawnSync|execFile|execFileSync|execSync|fork|execa|execaSync|subprocess|Popen|os\.exec\w*|execv\w*|exec\.Command|syscall\.Exec|Command::new)\b/;
+const SH_ARGS = /"\$@"|"\$\{@\}"|\$@|\$\*|"\$\{\w+\[@\]\}"/;
+
+// Whether a command's entry file hands its arguments to another program, so a flag it does not
+// spell may still be one that program takes. When unsure it says yes: the cost is a REVIEW
+// finding where a HIGH one would have been right, the other way round it is a false HIGH.
+function passesArgsOn(text, file) {
+  if (PASS_THROUGH.test(text)) return true;
+  if (lang(file) !== 'sh') return RAW_ARGS.test(text) && SPAWNS.test(text);
+  // A shell line that runs a command with "$@", other than a loop, case or set over the
+  // arguments or a call of the script's own function.
+  const own = new Set([...text.matchAll(/^\s*(?:function\s+([\w-]+)|([\w-]+)\s*\(\))/gm)].map((m) => m[1] || m[2]));
+  return text.split('\n').some((line) => {
+    if (!SH_ARGS.test(line)) return false;
+    const words = line.trim().split(/\s+/);
+    while (words.length > 1 && /^\w+=/.test(words[0])) words.shift();
+    if (words.length === 1 && /^\w+=/.test(words[0])) return false; // args=("$@")
+    return !/^(for|case|set|shift|#)/.test(words[0]) && !own.has(words[0]);
+  });
 }
 
 // Parts of a doc line that are code: the whole line inside a fence, else its `code spans`.
@@ -190,7 +234,7 @@ function fenceLines(lines) {
   return inside;
 }
 
-// Flags given to one of our commands in a piece of code: [{cmd, kind, flag}].
+// Flags given to one of our commands in a piece of code: [{cmd, kind, flag, entry}].
 function invocations(code, own, scripts) {
   const out = [];
   for (const seg of code.split(/\|\||&&|[|;]/)) {
@@ -201,21 +245,22 @@ function invocations(code, own, scripts) {
     if (words[i] === 'run' && words[i - 1] === 'pipx') i++;
     let cmd = null;
     let kind = null;
+    let entry = null;
     const w = words[i] || '';
     const slashM = /^\/(?:[a-z0-9-]+:)?([a-z0-9][\w-]*)$/.exec(w);
     if (slashM && own.slash.has(slashM[1])) { cmd = slashM[1]; kind = 'slash'; }
-    else if (own.bins.includes(w)) { cmd = w; kind = 'bin'; }
+    else if (own.bins.has(w)) { cmd = w; kind = 'bin'; entry = own.bins.get(w); }
     else if (/^(node|python3?|bash|sh|zsh|deno|bun|tsx|ts-node|uv)$/.test(w)) {
       let j = i + 1;
       while (j < words.length && (words[j].startsWith('-') || words[j] === 'run')) j++;
       const target = (words[j] || '').replace(/^(<[^>]+>|\$\{?[A-Za-z_]+\}?)\//, '').replace(/^\.\//, '');
-      if (scripts(target)) { cmd = target; kind = 'script'; i = j; }
-    } else if (/^\.\//.test(w) && scripts(w.slice(2))) { cmd = w.slice(2); kind = 'script'; }
+      if (scripts(target)) { cmd = target; kind = 'script'; entry = target; i = j; }
+    } else if (/^\.\//.test(w) && scripts(w.slice(2))) { cmd = w.slice(2); kind = 'script'; entry = cmd; }
     if (!cmd) continue;
     for (const arg of words.slice(i + 1)) {
       if (arg === '--') break; // the rest goes to another program
       const m = /^(--[a-z][a-z0-9-]*)(=|$)/.exec(arg.replace(/^["'`]|["'`,.]$/g, ''));
-      if (m && m[1].length > 3) out.push({ cmd, kind, flag: m[1] });
+      if (m && m[1].length > 3 && !BUILTIN_FLAGS.has(m[1])) out.push({ cmd, kind, flag: m[1], entry });
     }
   }
   return out;
@@ -231,43 +276,48 @@ function spellings(flag) {
   return [...new Set(forms)].filter((s) => s.length >= 3);
 }
 
-function docExampleStale(ctx) {
+// Slash commands this change deleted or moved, still invoked in docs.
+function goneSlashCommands(ctx, own) {
   const items = [];
-  const own = ownCommands(ctx);
-  // Slash commands this change deleted or moved, still invoked in docs.
-  const goneSlash = [];
+  const gone = [];
   for (const f of ctx.files) {
     const m = f.oldPath && /(^|\/)commands\/([a-z0-9][\w-]*)\.md$/.exec(f.oldPath);
-    if (m && (f.status === 'D' || f.status === 'R') && !own.slash.has(m[2])) goneSlash.push(m[2]);
+    if (m && (f.status === 'D' || f.status === 'R') && !own.slash.has(m[2])) gone.push(m[2]);
   }
-  if (goneSlash.length) {
-    for (const h of ctx.grep(goneSlash.map((n) => `/${n}`))) {
-      const k = ctx.kindOf(h.file);
-      if (!TEXT_KINDS.has(k) || k === 'changelog' || HISTORY.test(h.text)) continue;
-      for (const n of goneSlash) {
-        if (!new RegExp(`(^|[\\s\`'"(])/(?:[a-z0-9-]+:)?${escapeRe(n)}(?![\\w-])`).test(h.text)) continue;
-        items.push({ check: 'doc-example-stale', severity: 'high', file: h.file, line: h.line, excerpt: h.text.trim().slice(0, 160), message: `invokes \`/${n}\`, whose command file this change deleted`, token: `/${n}` });
-      }
+  if (!gone.length) return items;
+  for (const h of ctx.grep(gone.map((n) => `/${n}`))) {
+    const k = ctx.kindOf(h.file);
+    if (!TEXT_KINDS.has(k) || k === 'changelog' || SNAPSHOT.test(h.file) || HISTORY.test(h.text)) continue;
+    for (const n of gone) {
+      if (!new RegExp(`(^|[\\s\`'"(])/(?:[a-z0-9-]+:)?${escapeRe(n)}(?![\\w-])`).test(h.text)) continue;
+      items.push({ check: 'doc-example-stale', severity: 'high', file: h.file, line: h.line, excerpt: h.text.trim().slice(0, 160), message: `invokes \`/${n}\`, whose command file this change deleted`, token: `/${n}` });
     }
   }
-  if (!own.bins.length && !own.slash.size && ![...ctx.headFiles].some((p) => lang(p) && /(^|\/)(scripts|bin|tools)\//.test(p))) return items;
+  return items;
+}
+
+// Our commands run with long flags in doc lines: the lines this change added, or every doc line
+// in repo scope.
+function docUses(ctx, own) {
   const scripts = (p) => ctx.headFiles.has(p) && ctx.kindOf(p) === 'code';
-  // Doc lines to read: lines this change added, or every doc line in repo scope.
   const uses = [];
-  const fenced = new Map();
   for (const f of ctx.files) {
-    if (!TEXT_KINDS.has(f.kind) || f.kind === 'changelog' || SKIP_KINDS.has(f.kind)) continue;
-    if (!fenced.has(f.path)) fenced.set(f.path, fenceLines(ctx.lines(f.path) || []));
+    if (!TEXT_KINDS.has(f.kind) || f.kind === 'changelog' || SKIP_KINDS.has(f.kind) || SNAPSHOT.test(f.path)) continue;
+    const fenced = fenceLines(ctx.lines(f.path) || []);
     for (const a of f.added) {
       if (HISTORY.test(a.text)) continue;
-      for (const part of codeParts(a.text, fenced.get(f.path).has(a.line))) {
+      for (const part of codeParts(a.text, fenced.has(a.line))) {
         for (const u of invocations(part, own, scripts)) uses.push({ ...u, file: f.path, line: a.line, text: a.text });
       }
     }
   }
-  if (!uses.length) return items;
-  // Where each spelling appears as a whole word, by the kind of file.
-  const at = new Map(); // spelling -> [{file, line, kind}]
+  return uses;
+}
+
+// A predicate: does some file define the flag of a use in any spelling? Code, tests and config
+// define a CLI's flags; a slash command's are defined in prose, by its command, skill or agent file.
+function flagDefinitions(ctx, uses) {
+  const at = new Map(); // spelling -> [{file, line, kind}], where it appears as a whole word
   const index = (forms) => {
     for (const h of ctx.grep([...forms])) {
       const k = ctx.kindOf(h.file);
@@ -279,7 +329,6 @@ function docExampleStale(ctx) {
       }
     }
   };
-  // A slash command's flags are defined in prose, by its command, skill or agent file.
   const DEFINES = { slash: new Set(['prompt', 'code']), other: new Set(['code', 'test', 'config', 'ci', 'other']) };
   const defined = (u) => {
     const kinds = DEFINES[u.kind === 'slash' ? 'slash' : 'other'];
@@ -291,21 +340,44 @@ function docExampleStale(ctx) {
   index(new Set(uses.flatMap((u) => spellings(u.flag).filter((sp) => !plain(sp)))));
   const open = uses.filter((u) => !defined(u));
   if (open.length) index(new Set(open.flatMap((u) => spellings(u.flag).filter(plain))));
+  return defined;
+}
+
+function docExampleStale(ctx) {
+  const own = ownCommands(ctx);
+  const items = goneSlashCommands(ctx, own);
+  if (!own.bins.size && !own.slash.size && ![...ctx.headFiles].some((p) => lang(p) && /(^|\/)(scripts|bin|tools)\//.test(p))) return items;
+  const uses = docUses(ctx, own);
+  if (!uses.length) return items;
+  const defined = flagDefinitions(ctx, uses);
+  // Absence of a spelling is enough for HIGH only when the command's entry file was read and
+  // keeps its arguments to itself; otherwise the flag may belong to a program it calls.
+  const forwards = new Map();
+  const passesOn = (entry) => {
+    if (!forwards.has(entry)) {
+      const text = ctx.headReader.read(entry);
+      forwards.set(entry, text === null ? null : passesArgsOn(text, entry));
+    }
+    return forwards.get(entry);
+  };
   const seen = new Set();
   for (const u of uses) {
     const key = `${u.file}:${u.line}:${u.flag}`;
     if (seen.has(key) || defined(u)) continue;
     seen.add(key);
     const who = u.kind === 'slash' ? `/${u.cmd}` : u.cmd;
+    const fwd = u.kind === 'slash' || !u.entry ? null : passesOn(u.entry);
+    let message = u.kind === 'slash'
+      ? `passes \`${u.flag}\` to \`${who}\`, but no command, skill or agent file mentions that flag`
+      : `passes \`${u.flag}\` to \`${who}\`, but no code in the repo defines that flag in any spelling`;
+    if (fwd) message += `; ${u.entry} hands its arguments to another program, so check whether that one takes it`;
     items.push({
       check: 'doc-example-stale',
-      severity: u.kind === 'slash' ? 'review' : 'high',
+      severity: fwd === false ? 'high' : 'review',
       file: u.file,
       line: u.line,
       excerpt: u.text.trim().slice(0, 160),
-      message: u.kind === 'slash'
-        ? `passes \`${u.flag}\` to \`${who}\`, but no command, skill or agent file mentions that flag`
-        : `passes \`${u.flag}\` to \`${who}\`, but no code in the repo defines that flag in any spelling`,
+      message,
       token: u.flag,
     });
   }
@@ -315,7 +387,22 @@ function docExampleStale(ctx) {
 // --- version-mismatch --------------------------------------------------------------------
 
 const VERSIONED = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|plugin\.json|marketplace\.json|gemini-extension\.json|manifest\.json)$/;
-const norm = (n) => String(n || '').replace(/^@[^/]+\//, '').toLowerCase().replace(/_/g, '-');
+// Manifests whose names carry no npm scope: a plugin or extension manifest, Cargo, PyPI.
+const UNSCOPED = /(^|\/)(plugin\.json|marketplace\.json|gemini-extension\.json|manifest\.json|Cargo\.toml|pyproject\.toml)$/;
+const nameKey = (n) => String(n || '').toLowerCase().replace(/_/g, '-');
+const bareName = (n) => nameKey(n).replace(/^@[^/]+\//, '');
+const versioned = (ctx) => [...ctx.headFiles].filter((p) => VERSIONED.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)) && !SNAPSHOT.test(p));
+
+// Two manifest records describe the same package when the names match with their npm scope, or
+// when one is @scope/kit and the other "kit" in a manifest that cannot carry a scope (a plugin
+// manifest mirroring its npm package), as long as no other scope also publishes a "kit".
+function samePackage(a, b, scopes) {
+  if (nameKey(a.name) === nameKey(b.name)) return true;
+  if (bareName(a.name) !== bareName(b.name)) return false;
+  const plain = a.name.startsWith('@') ? b : a;
+  if (plain.name.startsWith('@')) return false;
+  return UNSCOPED.test(plain.file) && (scopes.get(bareName(a.name)) || new Set()).size === 1;
+}
 
 // {name, version, line} for each object in a JSON manifest that has both, with the line of
 // its version value (top level and nested entries such as a marketplace's plugins).
@@ -384,22 +471,30 @@ function versionMismatch(ctx) {
   if (ctx.scope !== 'diff' || !ctx.baseReader) return items;
   const bumps = [];
   for (const f of ctx.files) {
-    if (!VERSIONED.test(f.path) || f.status === 'D' || SKIP_KINDS.has(f.kind)) continue;
+    if (!VERSIONED.test(f.path) || f.status === 'D' || SKIP_KINDS.has(f.kind) || SNAPSHOT.test(f.path)) continue;
     const before = records(f.oldPath, ctx.baseReader.read(f.oldPath));
     const after = records(f.path, ctx.headReader.read(f.path));
     for (const a of after) {
-      const b = before.find((r) => norm(r.name) === norm(a.name));
-      if (b && b.version !== a.version) bumps.push({ name: norm(a.name), from: b.version, to: a.version, file: f.path, line: a.line });
+      const b = before.find((r) => nameKey(r.name) === nameKey(a.name));
+      if (b && b.version !== a.version) bumps.push({ name: a.name, from: b.version, to: a.version, file: f.path, line: a.line });
     }
   }
   if (!bumps.length) return items;
-  const manifests = [...ctx.headFiles].filter((p) => VERSIONED.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)));
+  const manifests = versioned(ctx);
   const texts = ctx.headReader.readMany ? ctx.headReader.readMany(manifests) : manifests.map((p) => ctx.headReader.read(p));
+  const recs = manifests.map((p, i) => records(p, texts[i]));
+  // The scoped names in the repo by their bare name, to tell a mirror from a namesake.
+  const scopes = new Map();
+  for (const r of recs.flat()) {
+    if (!r.name.startsWith('@')) continue;
+    if (!scopes.has(bareName(r.name))) scopes.set(bareName(r.name), new Set());
+    scopes.get(bareName(r.name)).add(nameKey(r.name));
+  }
   const lines = new Map();
   manifests.forEach((p, i) => {
-    for (const r of records(p, texts[i])) {
+    for (const r of recs[i]) {
       for (const b of bumps) {
-        if (p === b.file || norm(r.name) !== b.name || r.version !== b.from) continue;
+        if (p === b.file || r.version !== b.from || !samePackage({ name: r.name, file: p }, { name: b.name, file: b.file }, scopes)) continue;
         const key = `${p}:${r.line}`;
         if (lines.has(key)) continue;
         lines.set(key, true);
@@ -424,24 +519,25 @@ function versionMismatch(ctx) {
 function pinnedVersions(ctx) {
   const items = [];
   if (ctx.scope !== 'diff') return items;
-  const manifests = [...ctx.headFiles].filter((p) => VERSIONED.test(p) && !SKIP_KINDS.has(ctx.kindOf(p)));
+  const manifests = versioned(ctx);
   const texts = ctx.headReader.readMany ? ctx.headReader.readMany(manifests) : manifests.map((p) => ctx.headReader.read(p));
+  // Keyed by the full name: "kit@1.0" in a doc is not the npm package @scope/kit.
   const current = new Map();
   manifests.forEach((p, i) => {
     for (const r of records(p, texts[i])) {
-      const n = norm(r.name);
-      if (n.length < 3) continue;
+      const n = nameKey(r.name);
+      if (bareName(r.name).length < 3) continue;
       if (!current.has(n)) current.set(n, new Set());
       current.get(n).add(r.version);
     }
   });
   if (!current.size) return items;
   for (const f of ctx.files) {
-    if (!TEXT_KINDS.has(f.kind) || f.kind === 'changelog') continue;
+    if (!TEXT_KINDS.has(f.kind) || f.kind === 'changelog' || SNAPSHOT.test(f.path)) continue;
     for (const a of f.added) {
       if (HISTORY.test(a.text)) continue;
       for (const m of a.text.matchAll(/(?<![\w@/.-])(@?[a-z0-9][\w./-]*?)(?:@v?|==|\s+--version\s+v?)(\d+\.\d+\.\d+)(?![\w.])/gi)) {
-        const n = norm(m[1]);
+        const n = nameKey(m[1]);
         const have = current.get(n);
         if (!have || have.has(m[2]) || have.size > 1) continue;
         items.push({ check: 'version-mismatch', severity: 'review', file: f.path, line: a.line, excerpt: a.text.trim().slice(0, 160), message: `pins \`${m[1]}\` to ${m[2]}, but its manifest says ${[...have][0]}`, token: m[2], fix: { fixType: 'replace-token', from: m[2], to: [...have][0] } });

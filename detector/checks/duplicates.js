@@ -89,12 +89,14 @@ function substantialLines(toks, from, to) {
 // Added code files, lexed, with their runs of at least MIN_TOKENS tokens on added lines.
 function addedRuns(ctx, intern) {
   const changed = [];
-  for (const f of ctx.files) {
+  // Snapshots and dated record folders keep copies of code on purpose.
+  const files = ctx.files.filter((f) => f.kind === 'code' && f.status !== 'D' && LEXED.has(lang(f.path)) && f.added.length >= MIN_LINES && !RUST_TESTS.test(f.path) && !SNAPSHOT.test(f.path));
+  const sizes = ctx.headReader.sizes(files.map((f) => f.path));
+  for (const [k, f] of files.entries()) {
+    if (sizes[k] === null || sizes[k] > MAX_FILE) continue;
     const l = lang(f.path);
-    // Snapshots and dated record folders keep copies of code on purpose.
-    if (f.kind !== 'code' || f.status === 'D' || !LEXED.has(l) || f.added.length < MIN_LINES || RUST_TESTS.test(f.path) || SNAPSHOT.test(f.path)) continue;
     const text = ctx.headReader.read(f.path);
-    if (text === null || text.length > MAX_FILE || isGenerated(text)) continue;
+    if (text === null || isGenerated(text)) continue;
     const p = prepare(f.path, text, l, intern);
     p.added = new Set(f.added.map((a) => a.line));
     p.runs = [];
@@ -148,14 +150,20 @@ function otherFiles(ctx, changed, intern) {
     .map((p) => ({ p, near: near(p) }))
     .sort((x, y) => y.near - x.near || x.p.localeCompare(y.p))
     .map((x) => x.p);
-  const texts = ctx.headReader.readMany ? ctx.headReader.readMany(paths) : paths.map((p) => ctx.headReader.read(p));
-  const out = [];
+  // Sizes first, so a file over MAX_FILE or past the budget is never read. Every file read counts
+  // against the budget, generated ones too: a file is known to be generated only once it is read.
+  const sizes = ctx.headReader.sizes(paths);
+  const take = [];
   let budget = SCAN_BUDGET;
   paths.forEach((p, k) => {
-    const text = texts[k];
-    if (text === null || text.length > MAX_FILE || budget <= 0 || isGenerated(text)) return;
-    budget -= text.length;
-    out.push(prepare(p, text, lang(p), intern));
+    if (sizes[k] === null || sizes[k] > MAX_FILE || budget <= 0) return;
+    budget -= sizes[k];
+    take.push(p);
+  });
+  const texts = ctx.headReader.readMany(take);
+  const out = [];
+  take.forEach((p, k) => {
+    if (texts[k] !== null && !isGenerated(texts[k])) out.push(prepare(p, texts[k], lang(p), intern));
   });
   return out;
 }

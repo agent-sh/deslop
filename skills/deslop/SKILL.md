@@ -22,7 +22,7 @@ Arguments: `$ARGUMENTS`
 | `stale-mention` | A file, flag, env var, function or value this change removed or replaced is still named elsewhere. | Is the line describing the current state? A dated record or a "was removed" note is fine. |
 | `missing-path` | An added line cites a repo path that does not exist. HIGH when this change deleted it. | Is it an example, another repo's path, or a file a sibling PR adds? |
 | `broken-anchor` | A Markdown link points at a heading that no longer exists. | Check the target's headings. |
-| `doc-example-stale` | A docs example passes a flag the repo's own CLI or slash command does not define, or invokes a slash command this change deleted. | Does the flag exist under a spelling the detector missed? |
+| `doc-example-stale` | A docs example passes a flag the repo's own CLI or slash command does not define, or invokes a slash command this change deleted. | Does the flag exist under a spelling the detector missed, or does the command hand it to another program that takes it? |
 | `version-mismatch` | The change moved a package's version in one manifest and left another manifest of the same package behind, or a new docs line pins another version. | Do both files describe the same package? |
 | `changelog-missing` | A user-visible change (flag, env var, command, skill or agent file, package bin, or a `feat:`/`fix:`/`perf:` commit over code) with nothing under `Unreleased`. | Would users notice the change? |
 | `scope-claim` | The PR text or a commit says docs-only or test-only but the diff changes code. | Comment-only code edits are fine. |
@@ -58,11 +58,11 @@ Without `--json` the detector prints a short text list, HIGH first, for a person
 
 Pass the PR body when there is one: `scope-claim` and `em-dash` read it along with the commit messages. `ripgrep` makes the detector fast on large repos; without it the detector falls back to `git grep`. Exit status 1 means the scan failed, not that it found something.
 
-`confirm.js` runs the small model the project configured, in this order: `--cmd`, the `DESLOP_SMALL_CMD` environment variable, or the `small` role in gishra's `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout), for example `{"harness": "codex", "profile": "luna"}`. Harnesses: `claude`, `codex`, `opencode`, `agy`, `pi`, or `command` with a `command` array where `{prompt}` is replaced. A role may add `model`, `profile`, `provider`, `effort` and `args`. `--dry-run` prints the command it would run.
+`confirm.js` runs the small model the project configured, in this order: `--cmd`, the `DESLOP_SMALL_CMD` environment variable, or the `small` role in gishra's `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout), for example `{"harness": "codex", "profile": "luna"}`. Harnesses: `claude`, `codex`, `opencode`, `agy`, `pi`, or `command` with a `command` array where an element `{prompt}` (or `--flag={prompt}`) is replaced. In a shell command `{prompt}` may stand bare or inside `"..."` or `'...'`; without it the prompt goes to stdin. A role may add `model`, `profile`, `provider`, `effort` and `args`. `--dry-run` prints the command it would run.
 
 It prints one of two things:
 
-- **A result**: JSON with `findings`, `fixes`, `dismissed`, `unconfirmed` and `summary`. Every fix was checked against the file. Use it as the `DESLOP_RESULT` below. If it carries an `"error"` (the model failed or replied with invalid JSON), every finding is in `unconfirmed`: judge those yourself as in Confirm.
+- **A result**: JSON with `findings`, `fixes`, `dismissed`, `unconfirmed` and `summary`. Every fix was checked against the file. Use it as the `DESLOP_RESULT` below. If it carries an `"error"` (the model failed, replied with invalid JSON or left a finding unjudged), every finding is in `unconfirmed`: judge those yourself as in Confirm. Never call a change clean while `unconfirmed` is not empty.
 - **`deslop-confirm: no small model configured`**, then each finding with its context. Judge them yourself as in Confirm.
 
 ## Confirm

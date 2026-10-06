@@ -84,6 +84,19 @@ class BlobReader {
     }
     return paths.map((p) => this.read(p));
   }
+  // Byte sizes (null for a missing path) without reading content, so a caller can leave out
+  // large files before loading them.
+  sizes(paths) {
+    if (!paths.length) return [];
+    if (this.rev) {
+      const r = spawnSync('git', ['-C', this.root, 'cat-file', '--batch-check=%(objectsize)'], { input: paths.map((p) => `${this.rev}:${p}`).join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX });
+      const lines = r.status === 0 ? r.stdout.split('\n') : [];
+      return paths.map((_, i) => (/^\d+$/.test(lines[i] || '') ? Number(lines[i]) : null));
+    }
+    return paths.map((p) => {
+      try { return require('fs').statSync(require('path').join(this.root, p)).size; } catch { return null; }
+    });
+  }
 }
 
 const EXCLUDE_GLOBS = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock', 'poetry.lock', 'uv.lock', 'go.sum', '*.min.js', '*.map', 'node_modules/**', 'vendor/**', 'third_party/**', 'dist/**']

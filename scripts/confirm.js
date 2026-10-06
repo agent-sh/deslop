@@ -13,15 +13,16 @@ finding, and prints the DESLOP_RESULT JSON: confirmed findings, dismissed ones w
 and fixes in simple-fixer form. Every fix is checked against the file before it is returned.
 
 The model command is the first of:
-  --cmd=COMMAND          a shell command; {prompt} in it becomes the prompt, otherwise the prompt is on stdin
+  --cmd=COMMAND          a shell command; {prompt} in it (bare, or inside "..." or '...') becomes the
+                         prompt as one argument, otherwise the prompt is on stdin
   DESLOP_SMALL_CMD       the same, from the environment
   the gishra "small" role in $GISHRA_STATE/project.json, or .gishra/project.json at the root of
                          the main checkout; harness claude, codex, opencode, agy, pi or command,
                          with optional model, profile, provider, effort and args
 
 With no model configured it prints the findings ready to judge and exits 0, so the calling agent
-judges them itself. If the model fails or its reply is not valid, every finding comes back
-unconfirmed with an "error" field.
+judges them itself. If the model fails, or its reply is not valid or leaves a finding unjudged,
+every finding comes back unconfirmed with an "error" field.
 
   --repo=DIR     repository the findings point into (default: current directory)
   --dry-run      print the model command that would run, as JSON, and exit
@@ -104,25 +105,85 @@ function roleArgv(role, prompt) {
       return ['pi', '-p', prompt, ...opt('--model', role.model), ...opt('--provider', role.provider), ...opt('--thinking', role.effort), ...extra];
     case 'command': {
       if (!Array.isArray(role.command) || !role.command.length) throw new Error('the command harness needs a "command" array');
-      return [...role.command.map((w) => String(w).split('{prompt}').join(prompt)), ...extra];
+      return [...role.command.map((w) => argWithPrompt(String(w), prompt)), ...extra];
     }
     default:
       throw new Error(`unsupported harness "${role.harness}" for the small role`);
   }
 }
 
-// How to run the model: {label, argv, stdin} or null when nothing is configured.
+const PROMPT = '{prompt}';
+
+// One element of a command array. The prompt must stay exactly one argument: a word that embeds
+// it in more text (sh -c "model {prompt}", python -c "...{prompt}...") hands repository text to
+// an interpreter, which re-parses its quotes and can run what is in them.
+function argWithPrompt(word, prompt) {
+  if (!word.includes(PROMPT)) return word;
+  const m = /^(-{1,2}[A-Za-z0-9][\w.-]*=)?\{prompt\}$/.exec(word);
+  if (!m) throw new Error(`the command harness takes {prompt} as a whole element or as --flag={prompt}, not inside ${JSON.stringify(word.slice(0, 60))}; for a shell, pass it as an argument: ["sh", "-c", "model \\"$1\\"", "sh", "{prompt}"]`);
+  return (m[1] || '') + prompt;
+}
+
+// A shell command's {prompt} becomes an expansion of $DESLOP_PROMPT that is one word in its
+// quoting context: "${DESLOP_PROMPT}" bare, ${DESLOP_PROMPT} inside double quotes, and
+// '"${DESLOP_PROMPT}"' inside single quotes (close the quote, expand, reopen). Inside $(...),
+// ${...}, backticks, $'...' or a here-document the quoting rules differ between shells, so a
+// {prompt} there, or one escaped with a backslash, is refused rather than passed corrupted.
+const EXPAND = '${DESLOP_PROMPT}';
+function shellWithPrompt(cmd) {
+  const stack = []; // open quotes and substitutions: ' " ( $( ${ ` $'
+  let out = '';
+  let replaced = 0;
+  let heredoc = false;
+  const refuse = () => new Error(`{prompt} in --cmd or DESLOP_SMALL_CMD can stand bare or inside "..." or '...', not escaped or inside $(...), \${...}, backticks, $'...' or a here-document; leave it out to get the prompt on stdin`);
+  for (let i = 0; i < cmd.length;) {
+    const top = stack[stack.length - 1];
+    if (top !== "$'" && cmd.startsWith(PROMPT, i)) {
+      if (heredoc || stack.some((s) => !["'", '"', '('].includes(s))) throw refuse();
+      out += top === '"' ? EXPAND : top === "'" ? `'"${EXPAND}"'` : `"${EXPAND}"`;
+      replaced++;
+      i += PROMPT.length;
+      continue;
+    }
+    const c = cmd[i];
+    const two = cmd.slice(i, i + 2);
+    let take = 1;
+    if (top === "'") { if (c === "'") stack.pop(); }
+    else if (c === '\\') take = 2; // the escaped character is never the start of a {prompt}
+    else if (top === "$'") { if (c === "'") stack.pop(); }
+    else if (top === '"') {
+      if (c === '"') stack.pop();
+      else if (two === '$(' || two === '${') { stack.push(two); take = 2; }
+      else if (c === '`') stack.push('`');
+    } else if (top === '`' && c === '`') stack.pop();
+    else if (c === "'" || c === '"') stack.push(c);
+    else if (two === "$'" || two === '$(' || two === '${') { stack.push(two); take = 2; }
+    else if (c === '`') stack.push('`');
+    else if (c === '(') stack.push('(');
+    else if (c === ')' && (top === '(' || top === '$(')) stack.pop();
+    else if (c === '}' && top === '${') stack.pop();
+    else if (two === '<<') heredoc = true;
+    out += cmd.slice(i, i + take);
+    i += take;
+  }
+  if (replaced !== cmd.split(PROMPT).length - 1) throw refuse();
+  return out;
+}
+
+// How to run the model: {label, argv, stdin, env} or null when nothing is configured.
 function resolveModel(o, prompt) {
   const shell = o.cmd || process.env.DESLOP_SMALL_CMD;
   if (shell) {
     // The prompt reaches the shell through the environment, never spliced into the command text.
-    const uses = shell.includes('{prompt}');
-    return { label: shell, argv: ['sh', '-c', shell.split('{prompt}').join('"$DESLOP_PROMPT"')], stdin: !uses, env: { DESLOP_PROMPT: prompt }, from: o.cmd ? '--cmd' : 'DESLOP_SMALL_CMD' };
+    // Without {prompt} it goes to stdin only: an environment string has the same exec size limit
+    // as an argument, so setting it anyway would bound the stdin path too.
+    const uses = shell.includes(PROMPT);
+    return { label: shell, argv: ['sh', '-c', uses ? shellWithPrompt(shell) : shell], stdin: !uses, env: uses ? { DESLOP_PROMPT: prompt } : {}, from: o.cmd ? '--cmd' : 'DESLOP_SMALL_CMD' };
   }
   const g = gishraRole(o.repo);
   if (!g) return null;
   const argv = roleArgv(g.role, prompt);
-  const stdin = g.role.harness === 'command' && !g.role.command.some((w) => String(w).includes('{prompt}'));
+  const stdin = g.role.harness === 'command' && !g.role.command.some((w) => String(w).includes(PROMPT));
   const label = [g.role.harness, g.role.profile || g.role.model].filter(Boolean).join(':');
   return { label, argv, stdin, env: {}, from: g.file };
 }
@@ -145,7 +206,7 @@ function context(repo, file, line, cache) {
   return out;
 }
 
-function describe(item, repo, cache) {
+function describe(item, repo, cache, limit) {
   const out = [`[${item.id}] ${item.check} (${item.severity}) ${item.file}${item.line ? ':' + item.line : ''}`, `    ${item.message}`];
   if (item.changed) {
     const c = item.changed;
@@ -157,7 +218,33 @@ function describe(item, repo, cache) {
   const ctx = context(repo, item.file, item.line, cache);
   if (ctx.length) out.push(...ctx.map((l) => `    ${l}`));
   else if (item.excerpt) out.push(`    > ${item.excerpt}`);
-  return out.join('\n');
+  return fit(out, limit).join('\n');
+}
+
+const bytes = (s) => Buffer.byteLength(s, 'utf8');
+const CLIPPED = ' [clipped]';
+
+// The first n bytes of s, cut at a character boundary.
+function clipBytes(s, n) {
+  const b = Buffer.from(s, 'utf8');
+  if (b.length <= n) return s;
+  let end = n;
+  while (end > 0 && (b[end] & 0xc0) === 0x80) end--;
+  return b.subarray(0, end).toString('utf8');
+}
+
+// A finding too large for one prompt (a huge message or excerpt) has its longest line clipped
+// until it fits, so it still reaches the model with its header and flagged line.
+function fit(lines, limit) {
+  const size = () => lines.reduce((n, l) => n + bytes(l) + 1, -1);
+  for (let over = size() - limit; over > 0; over = size() - limit) {
+    let k = 0;
+    for (let i = 1; i < lines.length; i++) if (bytes(lines[i]) > bytes(lines[k])) k = i;
+    const keep = bytes(lines[k]) - over - bytes(CLIPPED);
+    if (keep <= 0) { lines.splice(k, 1); continue; }
+    lines[k] = clipBytes(lines[k], keep) + CLIPPED;
+  }
+  return lines;
 }
 
 const INSTRUCTIONS = `You are confirming findings from deslop, a detector for defects a code change leaves behind (text that was true before the change, references that resolve to nothing, copied code, functions grown too large). For each numbered finding, read the flagged line (marked >) and its context and decide whether it is a real defect after this change.
@@ -170,22 +257,26 @@ const INSTRUCTIONS = `You are confirming findings from deslop, a detector for de
 Reply with one JSON object and nothing else:
 {"confirmed": [1], "dismissed": [{"id": 2, "why": "..."}], "fixes": [{"file": "a.md", "line": 3, "action": "replace", "old": "x", "new": "y", "reason": "stale-mention"}]}`;
 
-// Argument strings over 128 KiB fail to exec on Linux; batches stay well under that.
-const BATCH_BYTES = 96 * 1024;
+// Linux refuses to exec an argument or environment string over 128 KiB (MAX_ARG_STRLEN, counted
+// in bytes), and the prompt is one; every prompt, instructions included, stays well under that.
+const PROMPT_BYTES = 96 * 1024;
+const HEAD = `${INSTRUCTIONS}\n\nFindings:\n\n`;
 
 function batches(items, repo) {
   const cache = new Map();
+  const room = PROMPT_BYTES - bytes(HEAD) - 1; // the findings, joined by blank lines, then a newline
   const out = [];
   let cur = [];
   let size = 0;
   for (const it of items) {
-    const text = describe(it, repo, cache);
-    if (cur.length && size + text.length > BATCH_BYTES) { out.push(cur); cur = []; size = 0; }
+    const text = describe(it, repo, cache, room);
+    const n = bytes(text);
+    if (cur.length && size + 2 + n > room) { out.push(cur); cur = []; size = 0; }
+    size += (cur.length ? 2 : 0) + n;
     cur.push({ it, text });
-    size += text.length + 2;
   }
   if (cur.length) out.push(cur);
-  return out.map((b) => ({ ids: b.map((x) => x.it.id), prompt: `${INSTRUCTIONS}\n\nFindings:\n\n${b.map((x) => x.text).join('\n\n')}\n` }));
+  return out.map((b) => ({ ids: b.map((x) => x.it.id), prompt: `${HEAD}${b.map((x) => x.text).join('\n\n')}\n` }));
 }
 
 // --- the reply ----------------------------------------------------------------------------
@@ -243,7 +334,10 @@ function validate(reply, ids) {
     if (f.action === 'replace' && (typeof f.old !== 'string' || !f.old || typeof f.new !== 'string')) throw new Error('a replace fix needs "old" and "new" strings');
     if (f.action.startsWith('insert') && typeof f.new !== 'string') throw new Error('an insert fix needs a "new" string');
   }
-  return { confirmed, dismissed, fixes: reply.fixes, unjudged: ids.filter((n) => !seen.has(n)) };
+  // A finding the reply skips is not judged, and reporting the rest would read as clean.
+  const missing = ids.filter((n) => !seen.has(n));
+  if (missing.length) throw new Error(`the reply does not judge finding${missing.length > 1 ? 's' : ''} ${missing.join(', ')}`);
+  return { confirmed, dismissed, fixes: reply.fixes };
 }
 
 // A fix is kept only when it edits a confirmed finding's line and its old text is on that line.
@@ -318,7 +412,6 @@ function main(argv) {
       const v = validate(extractJson(runModel(m, part.prompt, o)), part.ids);
       confirmed.push(...v.confirmed);
       for (const d of v.dismissed) result.dismissed.push({ ...brief(byId.get(d.id)), why: d.why });
-      for (const n of v.unjudged) result.unconfirmed.push(brief(byId.get(n)));
       fixes.push(...v.fixes);
     }
     result.findings = confirmed.map((n) => brief(byId.get(n)));
