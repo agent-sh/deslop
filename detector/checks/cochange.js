@@ -31,17 +31,20 @@ module.exports = {
       const also = (Array.isArray(rule.also) ? rule.also : [rule.also]).map(globToRe);
       const trigger = edited.find((f) => when.some((re) => re.test(f.path)));
       if (!trigger || [...changed].some((p) => also.some((re) => re.test(p)))) continue;
-      items.push({ check: 'missing-companion', severity: 'high', file: trigger.path, line: 0, excerpt: '', message: rule.message || `changes here go with ${[].concat(rule.also).join(', ')}, which this change does not touch` });
+      items.push({ check: 'missing-companion', severity: 'high', file: trigger.path, line: 0, excerpt: '', token: [].concat(rule.also).join(','), message: rule.message || `changes here go with ${[].concat(rule.also).join(', ')}, which this change does not touch` });
     }
     if (ctx.opts.mineCochange === false || !ctx.base) return items;
     // Mined pairs from the commits before this change.
-    const log = git(ctx.root, ['log', '--no-merges', '--format=%x00', '--name-only', `-${HISTORY}`, ctx.base], { allowFail: true });
-    const commits = log.split('\0').map((c) => c.split('\n').filter(Boolean)).filter((c) => c.length > 1 && c.length <= 12);
+    const log = git(ctx.root, ['-c', 'core.quotepath=off', 'log', '--no-merges', '--format=%x00', '--name-only', `-${HISTORY}`, ctx.base], { allowFail: true });
+    const commits = log.split('\0').map((c) => c.split('\n').filter(Boolean)).filter((c) => c.length);
     const count = new Map();
     const pair = new Map();
     const focus = new Set(edited.map((f) => f.path));
     for (const c of commits) {
+      // Support counts every commit that touched the file, alone or not; only pairs skip
+      // sweeping commits, which pair everything with everything.
       for (const a of c) count.set(a, (count.get(a) || 0) + 1);
+      if (c.length > 12) continue;
       for (const a of c) {
         if (!focus.has(a)) continue;
         for (const b of c) if (a !== b) pair.set(`${a}\0${b}`, (pair.get(`${a}\0${b}`) || 0) + 1);
@@ -53,7 +56,7 @@ module.exports = {
       const support = count.get(a) || 0;
       if (support < MIN_SUPPORT || n / support < MIN_CONFIDENCE) continue;
       if (changed.has(b) || !ctx.headFiles.has(b) || SKIP_KINDS.has(ctx.kindOf(b)) || ctx.kindOf(b) === 'changelog') continue;
-      items.push({ check: 'missing-companion', severity: 'review', file: b, line: 0, excerpt: '', message: `changed in ${n} of the last ${support} commits that touched ${a}, but not in this one; check it still matches` });
+      items.push({ check: 'missing-companion', severity: 'review', file: b, line: 0, excerpt: '', token: a, message: `changed in ${n} of the last ${support} commits that touched ${a}, but not in this one; check it still matches` });
     }
     return items;
   },

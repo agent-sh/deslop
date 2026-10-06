@@ -16,7 +16,9 @@ const TEST_START = {
 };
 const SWALLOW = /\|\|\s*true\b|2>\s*\/dev\/null|set \+e\b|except(\s+\w+(\s+as\s+\w+)?)?\s*:\s*pass\b|catch\s*(\(\s*\w*\s*\))?\s*\{\s*\}/;
 const SH_PASS = /\b(PASS(ED)?|GREEN|OK|SUCCESS|all (tests )?pass(ed)?)\b/;
-const SH_FAIL = /\bexit\s+("?\$|[1-9])|\breturn\s+[1-9]|\b(fail|die|abort)\s*\(|\b(fail|die)\b\s|set\s+-[a-z]*e|\bfalse\b|\[\[?.*\]\]?\s*\|\|\s*exit/;
+// Ways a shell test can go red: an explicit failing exit, errexit in any spelling, a fail
+// helper, or a success marker printed only after a command chain succeeds.
+const SH_FAIL = /\bexit\s+("?\$|[1-9])|\breturn\s+[1-9]|\b(fail|die|abort)\s*\(|\b(fail|die)\b\s|set\s+-[a-z]*e|set\s+-o\s+errexit|^#!.*\s-[a-z]*e\b|\bfalse\b|\[\[?.*\]\]?\s*\|\|\s*exit|&&\s*(echo|printf)\b[^\n]*\b(PASS|OK|GREEN|SUCCESS)/m;
 
 // Body of a test that starts at index i (0-based) in lines, by brace or indentation.
 function body(lines, i, l) {

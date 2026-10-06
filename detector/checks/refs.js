@@ -39,6 +39,7 @@ module.exports = {
       if (/\$HOME|\$\{?[A-Z_]+\}?\/|~\/|plugin root|@module/.test(raw)) return;
       // A line that says the file is gone (deleted, removed, a dated record) is citing history.
       if (/\b(deleted|removed|retired|renamed|superseded|formerly|previously|no longer)\b/i.test(raw)) return;
+      try { cited = decodeURIComponent(cited); } catch { /* a literal % stays as written */ }
       let p = cited.replace(/[.,;:)'"`]+$/, '').replace(/:\d+(-\d+)?$/, '').replace(/#.*$/, '');
       if (!p || p.length < 4 || /[*$<>~()]|\.\.\.|^[a-z]+:/i.test(p) || PLACEHOLDER.test(p)) return;
       // A bare word is not a path; a citation has a directory or a file extension.

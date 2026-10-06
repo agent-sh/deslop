@@ -13,7 +13,7 @@ model: sonnet
 
 # deslop-agent
 
-The caller passes `Mode` and `Scope` (and sometimes a base ref or a PR number). Load the `deslop` skill with `<mode> --scope=<scope>` and follow it. Without the Skill tool, find the plugin's `skills/deslop/SKILL.md` and read it.
+The caller passes `Mode` and `Scope` (and sometimes a base ref or a PR number). Load the `deslop` skill with `<mode> --scope=<scope>` (and `--base=<base>` when the caller gave one) and follow it. Without the Skill tool, find the plugin's `skills/deslop/SKILL.md` and read it.
 
 When the branch has an open PR, pass its body to the detector (`gh pr view --json body -q .body`).
 

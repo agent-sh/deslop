@@ -19,7 +19,26 @@ function run(bin, args, input) {
   return r.error ? null : r.stdout;
 }
 
-const RUFF_RULES = 'F401,F811,F821,F841,F632,F811,B006,B011,B017,B018,E711,E712,PLE';
+const RUFF_RULES = 'F401,F811,F821,F841,F632,B006,B011,B017,B018,E711,E712,PLE';
+
+function parsesAsJsonc(text) {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      out += c;
+      if (c === '\\') { out += text[++i] || ''; continue; }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; out += c; continue; }
+    if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; out += '\n'; continue; }
+    if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2); if (i < 0) return false; i++; continue; }
+    out += c;
+  }
+  try { JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')); return true; } catch { return false; }
+}
 
 module.exports = {
   id: 'tools',
@@ -51,9 +70,13 @@ module.exports = {
         const out = run('actionlint', ['-format', '{{json .}}', '-stdin-filename', f.path, '-'], content);
         try { for (const c of JSON.parse(out || '[]')) push(c.line, c.message, 'actionlint'); } catch { /* skip */ }
       }
-      if (path.extname(f.path) === '.json' && !/tsconfig|jsconfig|\.vscode\//.test(f.path)) {
+      // Many .json files are JSONC (devcontainer, eslint, turbo, tsconfig): comments and
+      // trailing commas are fine there. Test fixtures may be invalid on purpose.
+      if (path.extname(f.path) === '.json' && f.kind !== 'test') {
         try { JSON.parse(content); } catch (e) {
-          items.push({ check: 'broken-file', severity: 'high', file: f.path, line: 1, excerpt: '', message: `does not parse as JSON: ${e.message.slice(0, 120)}` });
+          if (!parsesAsJsonc(content)) {
+            items.push({ check: 'broken-file', severity: 'high', file: f.path, line: 1, excerpt: '', message: `does not parse as JSON: ${e.message.slice(0, 120)}` });
+          }
         }
       }
     }

@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { detect, formatText } = require('../detector');
-const { isRepo } = require('../detector/git');
+const { isRepo, git } = require('../detector/git');
 
 const HELP = `Usage: detect.js [repo] [options] [-- paths...]
 
@@ -63,6 +63,17 @@ function main(argv) {
   }
   root = path.resolve(root);
   if (!isRepo(root)) throw new Error(`${root} is not a git repository`);
+  // Paths in git output are relative to the top level; run from there. A subdirectory given
+  // as the repo narrows repo scope to it.
+  const top = git(root, ['rev-parse', '--show-toplevel']).trim();
+  const sub = path.relative(top, root).split(path.sep).join('/');
+  if (sub && !sub.startsWith('..')) {
+    if (opts.scope === 'repo' && !opts.paths.length) opts.paths.push(sub);
+    root = top;
+  }
+  if (opts.scope === 'diff' && opts.paths.length) {
+    console.error('[WARN] paths are ignored in diff scope; use --scope=repo -- <paths> to scan files');
+  }
   const cfgPath = path.join(root, '.deslop.json');
   if (fs.existsSync(cfgPath)) {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));

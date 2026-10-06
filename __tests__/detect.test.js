@@ -63,6 +63,21 @@ describe('stale mentions', () => {
     expect(checks(items).some((c) => c.includes('docs/history.md'))).toBe(false);
   });
 
+  test('a deleted directory and a deleted image are still cited', () => {
+    const root = repo(
+      { 'tools/runners/run-all.sh': '#!/bin/sh\n', 'docs/arch.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 0]), 'docs/a.md': 'Runners live in tools/runners/.\n\n![arch](docs/arch.png)\n' },
+      { 'tools/runners/run-all.sh': null, 'docs/arch.png': null },
+    );
+    const tokens = detect(root).filter((i) => i.check === 'stale-mention').map((i) => i.token);
+    expect(tokens).toEqual(expect.arrayContaining(['tools/runners/', 'docs/arch.png']));
+  });
+
+  test('paths with spaces and non-ASCII names are read correctly', () => {
+    const root = repo({ 'src/my mod.rs': 'fn a() {}\n', 'src/caf\u00e9.rs': 'fn b() {}\n' }, { 'src/my mod.rs': '// revuto round 2: keep\nfn a() {}\n', 'src/caf\u00e9.rs': '// revuto round 3: keep\nfn b() {}\n' });
+    const files = detect(root).filter((i) => i.check === 'review-provenance').map((i) => i.file).sort();
+    expect(files).toEqual(['src/caf\u00e9.rs', 'src/my mod.rs']);
+  });
+
   test('a renamed file carries its new path as the fix', () => {
     const root = repo(
       { 'tools/build.sh': '#!/bin/sh\n', 'README.md': 'Build with tools/build.sh\n' },
@@ -90,12 +105,13 @@ describe('stale mentions', () => {
     expect(checks(items)).not.toContain('stale-mention@site/index.html:2');
   });
 
-  test('a version left in a frozen versioned-docs copy is not reported', () => {
+  test('a package version bump: the install line is stale, the frozen versioned docs are not', () => {
     const root = repo(
-      { 'Cargo.toml': '[package]\nname = "x"\nversion = "0.4.1"\n', 'website/versioned_docs/version-0.4.1/intro.md': 'x version 0.4.1\n' },
-      { 'Cargo.toml': '[package]\nname = "x"\nversion = "0.4.2"\n' },
+      { 'Cargo.toml': '[package]\nname = "toolkit"\nversion = "0.4.1"\n', 'README.md': 'cargo install toolkit@0.4.1\n', 'website/versioned_docs/version-0.4.1/intro.md': 'toolkit 0.4.1\n' },
+      { 'Cargo.toml': '[package]\nname = "toolkit"\nversion = "0.4.2"\n' },
     );
-    expect(detect(root).filter((i) => i.check === 'stale-mention')).toEqual([]);
+    const files = detect(root).filter((i) => i.check === 'stale-mention').map((i) => i.file);
+    expect(files).toEqual(['README.md']);
   });
 });
 
@@ -144,6 +160,11 @@ describe('comments and text', () => {
       { 'src/a.rs': '// revuto round 2: guard the empty case\nfn main() {}\n' },
     );
     expect(checks(detect(root))).toContain('review-provenance@src/a.rs:1');
+  });
+
+  test('a tool describing its own job is not review history', () => {
+    const root = repo({ 'lib/a.js': 'module.exports = 1;\n' }, { 'lib/a.js': '// Framework-specific code review patterns for the agent to review findings\nmodule.exports = 1;\n' });
+    expect(detect(root).some((i) => i.check === 'review-provenance')).toBe(false);
   });
 
   test('new code inserted between a doc comment and its item', () => {
@@ -198,6 +219,15 @@ describe('tests', () => {
     expect(got.map((i) => i.line)).toEqual([4]);
   });
 
+  test('shell tests that can fail through errexit or a guarded marker are fine', () => {
+    const root = repo({ 'README.md': 'x\n' }, {
+      'tests/a.sh': '#!/bin/bash -e\nrun_thing\necho PASS\n',
+      'tests/b.sh': '#!/bin/sh\nset -o errexit\nrun_thing\necho OK\n',
+      'tests/c.sh': '#!/bin/sh\nrun_thing && echo PASS\n',
+    });
+    expect(detect(root).filter((i) => i.check === 'test-cannot-fail')).toEqual([]);
+  });
+
   test('a shell test that always reports success', () => {
     const root = repo({ 'README.md': 'x\n' }, { 'tests/run.sh': '#!/bin/sh\nrun_thing 2>/dev/null\necho PASS\n' });
     expect(detect(root).some((i) => i.check === 'test-cannot-fail' && i.file === 'tests/run.sh')).toBe(true);
@@ -246,6 +276,24 @@ describe('companions', () => {
     expect(c.message).toBe('rules.json and docs/rules.md change together');
   });
 
+  test('commits that touched the file alone count against a mined pair', () => {
+    const root = repo({ 'src/hot.py': 'x = 0\n', 'docs/plan.md': 'x is 0\n' }, {}, { commit: false });
+    const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'pipe' });
+    git('checkout', '-q', 'main');
+    for (let i = 1; i <= 6; i++) {
+      write(root, { 'src/hot.py': `x = ${i}\n`, 'docs/plan.md': `x is ${i}\n` });
+      git('commit', '-q', '-am', `pair ${i}`);
+    }
+    for (let i = 7; i <= 20; i++) {
+      write(root, { 'src/hot.py': `x = ${i}\n` });
+      git('commit', '-q', '-am', `alone ${i}`);
+    }
+    git('checkout', '-q', '-B', 'feature');
+    write(root, { 'src/hot.py': 'x = 99\n' });
+    git('commit', '-q', '-am', 'only code');
+    expect(detect(root).some((i) => i.check === 'missing-companion')).toBe(false);
+  });
+
   test('a file that history always changes with the edited one', () => {
     const root = repo({ 'src/plan.py': 'x = 0\n', 'docs/plan.md': 'x is 0\n' }, {}, { commit: false });
     const git = (...a) => execFileSync('git', ['-C', root, ...a], { stdio: 'pipe' });
@@ -259,6 +307,14 @@ describe('companions', () => {
     git('commit', '-q', '-am', 'only code');
     const c = detect(root).find((i) => i.check === 'missing-companion');
     expect(c.file).toBe('docs/plan.md');
+  });
+});
+
+describe('files', () => {
+  test('JSONC config is not a broken file; invalid JSON is', () => {
+    const root = repo({ 'README.md': 'x\n' }, { '.devcontainer/devcontainer.json': '{\n  // image\n  "image": "x",\n}\n', 'config/app.json': '{"a": }\n' });
+    const broken = detect(root).filter((i) => i.check === 'broken-file').map((i) => i.file);
+    expect(broken).toEqual(['config/app.json']);
   });
 });
 
@@ -294,6 +350,12 @@ describe('scopes and inputs', () => {
     const root = repo({ 'a.js': 'const x = 1;\n' }, { 'a.js': 'const x = 2;\n' });
     const r = spawnSync('node', [DETECT, root, '--base=main', '--json', '--pr-body=-'], { input: 'Test-only change.\n', encoding: 'utf8' });
     expect(JSON.parse(r.stdout).items.map((i) => i.check)).toContain('scope-claim');
+  });
+
+  test('a subdirectory given as the repo runs from the top level', () => {
+    const root = repo({ 'pkg/docs/a.md': '# a\n', 'pkg/src/a.js': '1\n' }, { 'pkg/docs/a.md': '# a\n\nSee [a](../src/a.js).\n' });
+    const r = spawnSync('node', [DETECT, path.join(root, 'pkg'), '--base=main', '--json'], { encoding: 'utf8' });
+    expect(JSON.parse(r.stdout).items.filter((i) => i.check === 'missing-path')).toEqual([]);
   });
 
   test('not a git repository is an error with exit 1', () => {

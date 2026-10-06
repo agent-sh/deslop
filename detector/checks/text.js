@@ -5,11 +5,14 @@
 const { lang, commentOf, SKIP_KINDS, TEXT_KINDS } = require('../files');
 
 const CONFLICT = /^(<{7}(\s|$)|>{7}(\s|$)|\|{7}(\s|$)|={7}$)/;
-const PROVENANCE = /\b(revuto|bugbot|coderabbit|copilot review|self-review|code review|review(?:er)? (?:round|comment|feedback|finding|note)s?|round \d+ (?:of )?review|review round \d+|per (?:the )?review|addressed (?:the )?(?:review|feedback)|as (?:requested|suggested) (?:by|in) (?:the )?review|(?:the )?reviewer (?:asked|wanted|flagged|found|noted))\b/i;
+// History-shaped phrases only: review tooling describes its own job with "code review" and
+// "review findings", which is not provenance.
+const PROVENANCE = /\b(revuto|bugbot|coderabbit|copilot review|self-review|review rounds?(?: \d+)?|round \d+ (?:of )?review|\(round \d+\)|per (?:the )?review|addressed (?:the )?(?:review|feedback)|as (?:requested|suggested) (?:by|in) (?:the )?review|(?:the )?reviewer (?:asked|wanted|flagged|found|noted|pointed out))\b/i;
 const EM_DASH = /—/;
 const DOC_LINE = { rust: /^\s*\/\/[/!]/, js: /^\s*(\*\/|\/\*\*|\*\s|\*$)/, py: null, go: /^\s*\/\//, c: /^\s*(\/\/\/|\*\/|\*\s)/, hash: /^\s*#(?!!)/, sh: /^\s*#(?!!)/ };
 const ITEM_START = { rust: /^\s*(pub(\([^)]*\))?\s+)?(async\s+|unsafe\s+|const\s+)*(fn|struct|enum|trait|impl|type|mod|const|static)\b|^\s*#\[/, js: /^\s*(export\s+)?(async\s+)?(function|class|const|let|interface|type)\b/, go: /^(func|type|var|const)\b/, c: /^\s*(class|struct|enum|template|static|inline|void|int|bool|auto)\b/, hash: /^\s{0,4}[A-Za-z0-9_-]+:\s*$|^\[[^\]]+\]$/, sh: /^\s*(function\s+)?[A-Za-z_][\w-]*\s*\(\)/ };
-const SCOPE_CLAIM = /\b(docs?[- ]only|documentation[- ]only|no code changes?|no behaviou?r(al)? changes?|no functional changes?|tests?[- ]only|comment[- ]only|typo[- ]only|CI[- ]only|config[- ]only)\b/i;
+// Claims the diff can refute. "No behavior change" over a refactor is fine, so it is not here.
+const SCOPE_CLAIM = /\b(docs?[- ]only|documentation[- ]only|no code changes?|tests?[- ]only|comment[- ]only|typo[- ]only)\b/i;
 
 // Bot-written sections of a PR body (review summaries) are not the author's text.
 function stripBots(t) {
@@ -119,7 +122,7 @@ module.exports = {
           const lead = line.replace(/^[\s>*_#-]*(\*\*)?/, '');
           if (!lead.toLowerCase().startsWith(m[1].toLowerCase()) && !/\b(this|the) (pr|change|patch|commit) is\b/i.test(line)) continue;
           const claim = m[1].toLowerCase();
-          const offending = /test/.test(claim) ? src.code : /^(docs?|documentation|comment|typo)/.test(claim) ? [...src.code, ...src.tests] : [];
+          const offending = /test/.test(claim) ? src.code : [...src.code, ...src.tests];
           if (!offending.length) continue;
           push({ check: 'scope-claim', severity: 'high', file: '(PR text)', line: 0, excerpt: line.trim().slice(0, 160), message: `says "${m[1]}" but ${src.who} changes ${offending.length} code file(s), e.g. ${offending[0].path}` });
         }

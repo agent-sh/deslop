@@ -32,14 +32,16 @@ function buildContext(root, opts) {
     ctx.base = mb;
     ctx.baseRef = baseRef;
     const range = ctx.head ? [mb, ctx.head] : [mb];
-    const text = git(root, ['diff', '--no-color', '--no-ext-diff', '--unified=0', '-M', ...range]);
-    ctx.files = parseDiff(text).filter((f) => !f.binary);
+    // Fixed a/ b/ prefixes and unquoted paths whatever the user's diff settings are.
+    const text = git(root, ['-c', 'core.quotepath=off', 'diff', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--unified=0', '-M', ...range]);
+    // Binary files have no lines to check, but a deleted or moved one still retires its path.
+    ctx.files = parseDiff(text).filter((f) => !f.binary || f.status === 'D' || f.status === 'R');
     ctx.baseFiles = new Set(listFiles(root, mb));
     ctx.baseReader = new BlobReader(root, mb);
     ctx.commits = [];
     if (opts.commitText !== false) {
       // One record per commit: sha, message, and the files that commit changed.
-      const log = git(root, ['log', '--no-merges', '--format=%x1e%H%x1f%B%x1f', '--name-only', `${mb}..${ctx.head || 'HEAD'}`], { allowFail: true });
+      const log = git(root, ['-c', 'core.quotepath=off', 'log', '--no-merges', '--format=%x1e%H%x1f%B%x1f', '--name-only', `${mb}..${ctx.head || 'HEAD'}`], { allowFail: true });
       for (const rec of log.split('\x1e').slice(1)) {
         const [sha, message, files] = rec.split('\x1f');
         ctx.commits.push({ sha, message: (message || '').trim(), files: (files || '').split('\n').filter(Boolean) });

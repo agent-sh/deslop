@@ -83,7 +83,7 @@ function haveRg() {
 // No per-file match cap: it counts lines across all tokens, so common tokens would hide the
 // one line that mentions a rare one.
 function rgMany(root, tokens, tracked) {
-  const args = ['-n', '--null', '--no-heading', '--with-filename', '--no-config', '-F', '--hidden', '-M', '4000', '-f', '-', '-g', '!.git'];
+  const args = ['-n', '--null', '--no-heading', '--with-filename', '--no-config', '-F', '--hidden', '--path-separator', '/', '-M', '4000', '-f', '-', '-g', '!.git'];
   for (const g of EXCLUDE_GLOBS) args.push('-g', `!${g}`);
   args.push('.');
   const r = spawnSync('rg', args, { cwd: root, input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX });

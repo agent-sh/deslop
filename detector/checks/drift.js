@@ -89,6 +89,7 @@ function bounded(text, t) {
     const okB = b === undefined || (isPath ? !/[A-Za-z0-9_/.-]/.test(b) : !/[A-Za-z0-9_]/.test(b));
     let okA = a === undefined || !/[A-Za-z0-9_]/.test(a);
     if (isPath && a === '/') okA = false;
+    if (t.endsWith('/') && a !== undefined && (/[A-Za-z0-9_-]/.test(a) || (a === '.' && /[A-Za-z0-9]/.test(a2)))) okA = false;
     if ((a === '.' || a === '-') && /[A-Za-z0-9]/.test(a2)) okA = false; // longer name or file extension
     if (okB && okA) return true;
     i = text.indexOf(t, i + 1);
@@ -107,6 +108,16 @@ function neighbors(text, t) {
   const before = (text.slice(0, i).match(/[A-Za-z][A-Za-z_-]{2,}/g) || []).slice(-2);
   const after = (text.slice(i + t.length).match(/[A-Za-z][A-Za-z_-]{2,}/g) || []).slice(0, 2);
   return [...before, ...after].map((w) => w.toLowerCase()).filter((w) => !STOPWORDS.has(w));
+}
+
+const MANIFEST = /(^|\/)(package\.json|Cargo\.toml|pyproject\.toml|setup\.cfg)$/;
+
+// Name of the package whose version line this is, when the line is a manifest's version.
+function packageName(ctx, file, line) {
+  if (!MANIFEST.test(file) || !/^\s*"?version"?\s*[:=]/.test(line)) return null;
+  const text = ctx.headReader.read(file) || '';
+  const m = /^\s*"?name"?\s*[:=]\s*"([^"]+)"/m.exec(text);
+  return m && m[1].length >= 3 ? m[1].replace(/^@[^/]+\//, '') : null;
 }
 
 // The word right after a number in its old line: "3,518 tests" -> "tests".
@@ -159,6 +170,20 @@ module.exports = {
         }
       }
     }
+    // A directory the change emptied retires its own path too.
+    const goneDirs = new Set();
+    for (const f of ctx.files) {
+      if (f.status !== 'D' && f.status !== 'R') continue;
+      const parts = f.oldPath.split('/');
+      for (let i = 1; i < parts.length; i++) {
+        const d = parts.slice(0, i).join('/');
+        if (!ctx.dirs.has(d) && d.includes('/')) goneDirs.add(d);
+      }
+    }
+    for (const d of goneDirs) {
+      if (!retired.has(d)) retired.set(d, { from: d, line: 0, text: '', why: 'file' });
+      if (!retired.has(d + '/')) retired.set(d + '/', { from: d, line: 0, text: '', why: 'file' });
+    }
     const candidates = [];
     for (const [t, v] of retired) {
       if (added.has(t) && v.why !== 'file') continue;
@@ -200,8 +225,11 @@ module.exports = {
         }
         if (ty === 'number' || ty === 'version') {
           // Test data and unrelated lines reuse version numbers; keep lines that share a word
-          // with the line that changed.
+          // with the line that changed. A manifest's own version line names nothing, so the
+          // package name stands in ("tool@0.4.1", "tool 0.4.1").
           const near = neighbors(v.text, t);
+          const pkg = ty === 'version' && packageName(ctx, v.from, v.text);
+          if (pkg) near.push(pkg.toLowerCase());
           // Other entries of the file being edited are other entities; the author saw them.
           hs = hs.filter((h) => ctx.kindOf(h.file) !== 'test' && h.file !== v.from && (ty === 'number' || near.some((w) => h.text.toLowerCase().includes(w))));
         }

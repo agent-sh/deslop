@@ -59,7 +59,9 @@ module.exports = {
       }
     }
     const stem = (f) => path.posix.basename(f.path).replace(/\.[^.]+$/, '');
-    const names = [...new Set([...defs.map((d) => d.name), ...envs.map((e) => e.name), ...newFiles.map((f) => path.posix.basename(f.path)), ...newFiles.map(stem)])];
+    // A runner that globs the directory (tests/*.sh, scripts/**) also counts as a caller.
+    const dirTokens = (f) => { const d = path.posix.dirname(f.path); return [d + '/*', d + '/**', d + '/']; };
+    const names = [...new Set([...defs.map((d) => d.name), ...envs.map((e) => e.name), ...newFiles.map((f) => path.posix.basename(f.path)), ...newFiles.map(stem), ...newFiles.flatMap(dirTokens)])];
     if (!names.length) return items;
     const hits = ctx.grep(names);
     const uses = (name, skip) => hits.filter((h) => {
@@ -86,7 +88,6 @@ module.exports = {
     }
     for (const f of newFiles) {
       const base = path.posix.basename(f.path);
-      const dir = path.posix.dirname(f.path);
       const u = uses(base, (h) => h.file === f.path);
       if (u.length) continue;
       // Modules are loaded by name without the extension: require('./checks/x'), ['x', 'y'], from .x import.
@@ -94,8 +95,7 @@ module.exports = {
       const esc = s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const byName = new RegExp(`(['"\`/])${esc}(\\.[a-z]+)?['"\`]|\\bimport\\s+${esc}\\b|\\bfrom\\s+\\S*\\b${esc}\\b|\\bmod\\s+${esc}\\s*;`);
       if (hits.some((h) => h.file !== f.path && byName.test(h.text))) continue;
-      // A runner that globs the directory (tests/*.sh, scripts/**) also counts as a caller.
-      const globbed = ctx.grep([dir + '/*', dir + '/**', dir + '/']).some((h) => h.file !== f.path && !TEXT_KINDS.has(ctx.kindOf(h.file)));
+      const globbed = hits.some((h) => h.file !== f.path && !TEXT_KINDS.has(ctx.kindOf(h.file)) && dirTokens(f).some((t) => h.text.includes(t)));
       if (globbed) continue;
       items.push({
         check: 'no-caller',

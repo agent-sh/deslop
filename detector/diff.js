@@ -40,12 +40,13 @@ function parseDiff(text) {
     if (raw.startsWith('Binary files ')) { cur.binary = true; continue; }
     if (raw.startsWith('--- ')) {
       const p = raw.slice(4);
-      if (p !== '/dev/null') cur.oldPath = cur.oldPath || p.replace(/^a\//, '');
+      // git appends a tab after a path that contains a space.
+      if (p !== '/dev/null') cur.oldPath = cur.oldPath || p.replace(/\t$/, '').replace(/^a\//, '');
       continue;
     }
     if (raw.startsWith('+++ ')) {
       const p = raw.slice(4);
-      if (p !== '/dev/null') cur.path = p.replace(/^b\//, '');
+      if (p !== '/dev/null') cur.path = p.replace(/\t$/, '').replace(/^b\//, '');
       continue;
     }
     const h = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);
