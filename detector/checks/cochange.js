@@ -23,7 +23,8 @@ module.exports = {
   run(ctx) {
     const items = [];
     const changed = new Set(ctx.files.map((f) => f.path));
-    const edited = ctx.files.filter((f) => !SKIP_KINDS.has(f.kind) && f.kind !== 'changelog' && (f.added.length || f.removed.length));
+    // A deleted file has no companions left to keep in step.
+    const edited = ctx.files.filter((f) => f.status !== 'D' && !SKIP_KINDS.has(f.kind) && f.kind !== 'changelog' && (f.added.length || f.removed.length));
     // Declared pairs.
     for (const rule of ctx.opts.together || []) {
       const when = (Array.isArray(rule.when) ? rule.when : [rule.when]).map(globToRe);
