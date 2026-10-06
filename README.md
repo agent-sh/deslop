@@ -13,7 +13,7 @@ The slop changed. Current models do not leave debug prints, TODO stubs or empty 
 - a test that cannot fail, a PR body that says "docs-only" over a code change
 - a rewritten instruction file that lost a rule or its reason
 
-deslop 1.x looked for the old kind. Measured on 40 recent pull requests, 0.5% of its findings were real and it caught none of the 106 defects reviewers found, while a run cost 15 to 25K tokens. deslop 2 is a git-based detector: it costs nothing when the change is clean, and the agent reads only the lines it flags.
+deslop 1.x looked for the old kind. Measured on 39 recent pull requests, 0.5% of its findings were real and it caught none of the 106 defects reviewers found, while a run cost 15 to 25K tokens. deslop 2 is a git-based detector: it costs nothing when the change is clean, and the agent reads only the lines it flags.
 
 ## Installation
 

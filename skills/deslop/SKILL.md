@@ -74,7 +74,7 @@ Return this block last. `/deslop` and `/next-task` parse it; `fixes` use `next-t
   "scope": "diff",
   "base": "origin/main",
   "findings": [
-    { "file": "docs/setup.md", "line": 12, "check": "stale-mention",
+    { "file": "docs/setup.md", "line": 12, "check": "stale-mention", "severity": "high",
       "message": "names scripts/old-install.sh, which this change deleted" }
   ],
   "fixes": [
@@ -86,4 +86,4 @@ Return this block last. `/deslop` and `/next-task` parse it; `fixes` use `next-t
 === END_RESULT ===
 ```
 
-`action` is `remove-line`, `replace` (`old` to `new` on that line), `insert-after` or `insert-before` (`new`). Paths are relative to the repository root. On failure return the block with empty arrays and an `"error"` field.
+`severity` is the detector's level for that finding: `high` or `review`. Findings about the PR body or commit messages have `file: "(PR text)"` and `line: 0`; they are fixed by editing the PR or the next commit message, never by a file edit. `action` is `remove-line`, `replace` (`old` to `new` on that line), `insert-after` or `insert-before` (`new`). Paths are relative to the repository root. On failure return the block with empty arrays and an `"error"` field.

@@ -13,8 +13,10 @@ const SCOPE_CLAIM = /\b(docs?[- ]only|documentation[- ]only|no code changes?|no 
 
 // Bot-written sections of a PR body (review summaries) are not the author's text.
 function stripBots(t) {
-  return t.replace(/<!--\s*CURSOR_SUMMARY\s*-->[\s\S]*?<!--\s*\/CURSOR_SUMMARY\s*-->/g, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
+  let out = t.replace(/<!--\s*CURSOR_SUMMARY\s*-->[\s\S]*?<!--\s*\/CURSOR_SUMMARY\s*-->/g, '');
+  // Repeat until stable so a comment split around another one cannot survive.
+  for (let prev = null; prev !== out;) { prev = out; out = out.replace(/<!--[\s\S]*?-->/g, ''); }
+  return out;
 }
 
 // True when every changed line of a code file is a comment, a docstring line or blank.
@@ -97,22 +99,30 @@ module.exports = {
     }
     // Scope claims in the PR body or commit messages that the diff contradicts.
     const prText = stripBots(ctx.prText || '');
-    const claimText = [prText, ctx.commitText].filter(Boolean).join('\n');
+    const claimText = [prText, ...(ctx.commits || []).map((c) => c.message)].filter(Boolean).join('\n');
     if (claimText && ctx.scope === 'diff') {
+      const byPath = new Map(ctx.files.map((f) => [f.path, f]));
       const codeFiles = ctx.files.filter((f) => f.kind === 'code' && !commentOnly(ctx, f));
       const testFiles = ctx.files.filter((f) => f.kind === 'test');
-      const lines = claimText.split('\n');
-      for (const line of lines) {
-        // Only a claim about the whole change: the title, a commit subject, or a line that
-        // opens with it ("Docs-only: ..."), not a mention inside a sentence about something else.
-        const m = SCOPE_CLAIM.exec(line);
-        if (!m) continue;
-        const lead = line.replace(/^[\s>*_#-]*(\*\*)?/, '');
-        if (!lead.toLowerCase().startsWith(m[1].toLowerCase()) && !/\b(this|the) (pr|change|patch|commit) is\b/i.test(line)) continue;
-        const claim = m[1].toLowerCase();
-        const offending = /test/.test(claim) ? codeFiles : /^(docs?|documentation|comment|typo)/.test(claim) ? [...codeFiles, ...testFiles] : [];
-        if (!offending.length) continue;
-        push({ check: 'scope-claim', severity: 'high', file: '(PR text)', line: 0, excerpt: line.trim().slice(0, 160), message: `says "${m[1]}" but the diff changes ${offending.length} code file(s), e.g. ${offending[0].path}` });
+      // The PR body speaks for the whole branch; a commit message only for its own commit.
+      const sources = [{ text: prText, code: codeFiles, tests: testFiles, who: 'the diff' }];
+      for (const c of ctx.commits || []) {
+        const own = c.files.map((p) => byPath.get(p)).filter(Boolean);
+        sources.push({ text: c.message, code: own.filter((f) => codeFiles.includes(f)), tests: own.filter((f) => f.kind === 'test'), who: `commit ${c.sha.slice(0, 7)}` });
+      }
+      for (const src of sources) {
+        for (const line of src.text.split('\n')) {
+          // Only a claim about the whole change: a line that opens with it ("Docs-only: ...")
+          // or says "this PR is ...", not a mention inside a sentence about something else.
+          const m = SCOPE_CLAIM.exec(line);
+          if (!m) continue;
+          const lead = line.replace(/^[\s>*_#-]*(\*\*)?/, '');
+          if (!lead.toLowerCase().startsWith(m[1].toLowerCase()) && !/\b(this|the) (pr|change|patch|commit) is\b/i.test(line)) continue;
+          const claim = m[1].toLowerCase();
+          const offending = /test/.test(claim) ? src.code : /^(docs?|documentation|comment|typo)/.test(claim) ? [...src.code, ...src.tests] : [];
+          if (!offending.length) continue;
+          push({ check: 'scope-claim', severity: 'high', file: '(PR text)', line: 0, excerpt: line.trim().slice(0, 160), message: `says "${m[1]}" but ${src.who} changes ${offending.length} code file(s), e.g. ${offending[0].path}` });
+        }
       }
       for (const line of claimText.split('\n')) {
         if (style.emDash !== false && EM_DASH.test(line)) {

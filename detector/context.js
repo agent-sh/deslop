@@ -36,10 +36,25 @@ function buildContext(root, opts) {
     ctx.files = parseDiff(text).filter((f) => !f.binary);
     ctx.baseFiles = new Set(listFiles(root, mb));
     ctx.baseReader = new BlobReader(root, mb);
-    if (opts.commitText !== false && ctx.head) {
-      ctx.commitText = git(root, ['log', '--format=%B%n', `${mb}..${ctx.head}`], { allowFail: true });
-    } else {
-      ctx.commitText = '';
+    ctx.commits = [];
+    if (opts.commitText !== false) {
+      // One record per commit: sha, message, and the files that commit changed.
+      const log = git(root, ['log', '--no-merges', '--format=%x1e%H%x1f%B%x1f', '--name-only', `${mb}..${ctx.head || 'HEAD'}`], { allowFail: true });
+      for (const rec of log.split('\x1e').slice(1)) {
+        const [sha, message, files] = rec.split('\x1f');
+        ctx.commits.push({ sha, message: (message || '').trim(), files: (files || '').split('\n').filter(Boolean) });
+      }
+    }
+    if (!ctx.head) {
+      // Work-tree mode also covers files not yet added to git.
+      const untracked = git(root, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+      for (const p of untracked) {
+        ctx.headFiles.add(p);
+        const text = ctx.headReader.read(p);
+        if (text === null || text.length > 2_000_000) continue;
+        const added = text.split('\n').map((t, i) => ({ line: i + 1, text: t }));
+        ctx.files.push({ path: p, oldPath: p, status: 'A', added, removed: [], blocks: [{ added, removed: [], newStart: 1 }] });
+      }
     }
   } else {
     // Repo scope: every tracked text file counts as fully added, so line checks see all of it.
@@ -54,7 +69,11 @@ function buildContext(root, opts) {
       const added = text.split('\n').map((t, i) => ({ line: i + 1, text: t }));
       ctx.files.push({ path: p, oldPath: p, status: 'A', added, removed: [], blocks: [{ added, removed: [], newStart: 1 }], whole: true });
     }
-    ctx.commitText = '';
+    ctx.commits = [];
+  }
+  for (const f of ctx.headFiles) {
+    const parts = f.split('/');
+    for (let i = 1; i < parts.length; i++) ctx.dirs.add(parts.slice(0, i).join('/'));
   }
   ctx.touched = new Set();
   for (const f of ctx.files) { ctx.touched.add(f.path); if (f.oldPath) ctx.touched.add(f.oldPath); }

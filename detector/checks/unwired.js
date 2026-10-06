@@ -14,6 +14,8 @@ const DEF = {
 const ENTRY = /^(main|run|setup|teardown|init|new|default|drop|fmt|from|into|clone|eq|hash|handler|render|constructor|toString|toJSON|__\w+__)$/;
 const RUNNER_DISCOVERED = /(^|\/)(test_[^/]*\.py|[^/]*_test\.(py|go)|[^/]*\.(test|spec)\.[cm]?[jt]sx?|conftest\.py)$|(^|\/)__tests__\/|(^|\/)tests\/[^/]+\.rs$|(^|\/)(index|main|mod|lib|__init__|__main__|setup)\.[a-z]+$|\.d\.ts$|(^|\/)build\.rs$/;
 const SCRIPT_EXT = new Set(['.sh', '.bash', '.py', '.mjs', '.cjs', '.js', '.ts', '.rb', '.ps1']);
+// .env, prod.env, .env.local, settings.template
+const ENV_FILE = /(^|\/)[^/]*\.env(\.[^/]+)?$|\.template$/;
 const ENV_ASSIGN = /^\s*(?:export\s+)?([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)=/;
 
 function exportedOrPublic(text, l) {
@@ -50,7 +52,7 @@ module.exports = {
             break;
           }
         }
-        if ((f.kind === 'config' || /\.env|\.template$/.test(f.path)) && !/\.(json|ya?ml|toml)$/.test(f.path)) {
+        if ((f.kind === 'config' || ENV_FILE.test(f.path)) && !/\.(json|ya?ml|toml)$/.test(f.path)) {
           const m = ENV_ASSIGN.exec(a.text);
           if (m) envs.push({ name: m[1], f, a });
         }
@@ -109,7 +111,7 @@ module.exports = {
     for (const e of envs) {
       const readers = uses(e.name, (h) => {
         const k = ctx.kindOf(h.file);
-        return TEXT_KINDS.has(k) || h.file === e.f.path || /\.env|\.template$/.test(h.file);
+        return TEXT_KINDS.has(k) || h.file === e.f.path || ENV_FILE.test(h.file);
       });
       if (readers.length) continue;
       items.push({

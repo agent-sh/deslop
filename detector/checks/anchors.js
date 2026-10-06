@@ -1,17 +1,25 @@
 'use strict';
 // Markdown links to a heading that does not exist (renamed or removed sections).
+const path = require('path');
 const { SKIP_KINDS, TEXT_KINDS } = require('../files');
 
 const LINK = /\]\(([^)\s#]*)#([^)\s]+)\)/g;
 
 // GitHub's heading slug: lower-case, drop punctuation except - and _, spaces to -.
 function slug(h) {
-  return h.trim().toLowerCase()
-    .replace(/<[^>]+>/g, '')
+  // Drop inline HTML tags, repeating until stable so a tag split around another one goes too.
+  let t = h;
+  for (let prev = null; prev !== t;) { prev = t; t = t.replace(/<[^<>]*>/g, ''); }
+  return t.trim().toLowerCase()
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[`*_~]/g, (c) => (c === '_' ? '_' : ''))
     .replace(/[^\p{L}\p{N}\s_-]/gu, '')
     .replace(/\s/g, '-');
+}
+
+// A literal % in a link (notes.md#50%-done) is not a valid escape; keep it as written.
+function decode(s) {
+  try { return decodeURIComponent(s); } catch { return s; }
 }
 
 function anchorsOf(text) {
@@ -54,21 +62,28 @@ module.exports = {
       for (const a of f.added) sources.push({ file: f.path, line: a.line, text: a.text });
     }
     if (ctx.scope === 'diff' && editedHeadings.size) {
-      for (const h of ctx.grep(['#'])) {
+      // Links into an edited doc name its file (guide.md#x); links inside it start with ](#.
+      const names = [...new Set([...editedHeadings].map((p) => `${path.posix.basename(p)}#`))];
+      for (const h of ctx.grep(names)) {
         if (!/\.mdx?$/.test(h.file) || !/\]\([^)]*#/.test(h.text)) continue;
         sources.push({ file: h.file, line: h.line, text: h.text, inbound: true });
+      }
+      for (const p of editedHeadings) {
+        (ctx.lines(p) || []).forEach((text, i) => {
+          if (text.includes('](#')) sources.push({ file: p, line: i + 1, text, inbound: true });
+        });
       }
     }
     const seen = new Set();
     for (const s of sources) {
       for (const m of s.text.matchAll(LINK)) {
-        const target = m[1] ? ctx.rel(s.file, decodeURIComponent(m[1])) : s.file;
+        const target = m[1] ? ctx.rel(s.file, decode(m[1])) : s.file;
         if (m[1] && /^[a-z]+:/i.test(m[1])) continue;
         if (s.inbound && !editedHeadings.has(target)) continue;
         if (!/\.mdx?$/.test(target)) continue;
         const set = anchors(target);
         if (!set) continue; // missing file is the refs check's job
-        const frag = decodeURIComponent(m[2]).toLowerCase();
+        const frag = decode(m[2]).toLowerCase();
         if (set.has(frag) || /^(l\d+|user-content-)/.test(frag)) continue;
         const key = `${s.file}:${s.line}:${frag}`;
         if (seen.has(key)) continue;

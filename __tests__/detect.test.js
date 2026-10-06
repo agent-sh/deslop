@@ -109,6 +109,15 @@ describe('references', () => {
     expect(missing).toEqual(['lib/b.js']);
   });
 
+  test('a heading rename breaks a link in an untouched doc; a stray % does not stop the check', () => {
+    const root = repo(
+      { 'docs/guide.md': '# Guide\n\n## Install steps\n', 'docs/other.md': 'See [install](guide.md#install-steps) and [x](guide.md#50%-done).\n', 'docs/notes.md': '# Notes\n' },
+      { 'docs/guide.md': '# Guide\n\n## Setup\n' },
+    );
+    const anchors = detect(root).filter((i) => i.check === 'broken-anchor').map((i) => `${i.file}:${i.token}`);
+    expect(anchors).toContain('docs/other.md:docs/guide.md#install-steps');
+  });
+
   test('a link to a heading that does not exist', () => {
     const root = repo(
       { 'docs/guide.md': '# Guide\n\n## Install steps\n\ntext\n', 'README.md': '# x\n' },
@@ -150,6 +159,13 @@ describe('comments and text', () => {
     expect(detect(code).some((i) => i.check === 'scope-claim')).toBe(true);
     const comment = repo({ 'a.js': 'const x = 1;\n' }, { 'a.js': '// the default\nconst x = 1;\n' }, { message: 'docs-only: explain x' });
     expect(detect(comment).some((i) => i.check === 'scope-claim')).toBe(false);
+  });
+
+  test('a docs-only commit is judged by its own files, not by the rest of the branch', () => {
+    const root = repo({ 'a.js': 'const x = 1;\n', 'README.md': '# x\n' }, { 'a.js': 'const x = 2;\n' }, { message: 'feat: change x' });
+    write(root, { 'README.md': '# x\n\nWording.\n' });
+    execFileSync('git', ['-C', root, 'commit', '-q', '-am', 'docs-only: fix wording']);
+    expect(detect(root).some((i) => i.check === 'scope-claim')).toBe(false);
   });
 
   test('conflict markers and an em dash; the em dash can be turned off', () => {
@@ -256,6 +272,14 @@ describe('scopes and inputs', () => {
     const root = repo({ 'src/a.rs': 'fn main() {}\n' }, { 'src/a.rs': '// per review: keep\nfn main() {}\n' }, { commit: false });
     expect(detect(root)).toEqual([]);
     expect(detect(root, '--worktree').map((i) => i.check)).toContain('review-provenance');
+  });
+
+  test('--worktree covers files not yet added to git', () => {
+    const root = repo({ 'README.md': '# x\n' }, { 'README.md': '# x\n\nSee tools/new.sh.\n' }, { commit: false });
+    write(root, { 'tools/new.sh': '#!/bin/sh\n# per review: keep\necho hi\n' });
+    const items = detect(root, '--worktree');
+    expect(items.some((i) => i.check === 'missing-path')).toBe(false);
+    expect(items.some((i) => i.check === 'review-provenance' && i.file === 'tools/new.sh')).toBe(true);
   });
 
   test('repo scope narrowed to a path', () => {
