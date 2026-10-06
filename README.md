@@ -1,6 +1,6 @@
 # deslop
 
-Checks a change for what current coding models leave behind, and fixes what it confirms.
+One cleanup pass over a change: leftovers of what it removed or renamed, docs that no longer match the code, duplicated code, functions grown too large, and agent-config errors. Software finds the candidates; a small model confirms each one; confirmed fixes are applied on request.
 
 ## Why
 
@@ -13,7 +13,9 @@ The slop changed. Current models do not leave debug prints, TODO stubs or empty 
 - a test that cannot fail, a PR body that says "docs-only" over a code change
 - a rewritten instruction file that lost a rule or its reason
 
-deslop 1.x looked for the old kind. Measured on 39 recent pull requests, 0.5% of its findings were real and it caught none of the 106 defects reviewers found, while a run cost 15 to 25K tokens. deslop 2 is a git-based detector: it costs nothing when the change is clean, and the agent reads only the lines it flags.
+deslop 1.x looked for the old kind. Measured on 39 recent pull requests, 0.5% of its findings were real and it caught none of the 106 defects reviewers found, while a run cost 15 to 25K tokens. deslop 2 is a git-based detector: it costs nothing when the change is clean, and a small model reads only the lines it flags.
+
+The same pass covers the cleanup that used to need separate tools: docs kept in sync with the code (changelog entries, CLI examples, versions), code copied instead of reused, functions a change pushed past a readable size, and agent configuration checked by [agnix](https://github.com/agent-sh/agnix).
 
 ## Installation
 
@@ -30,12 +32,13 @@ agentsys install deslop
 /deslop --scope=docs/        # every tracked file under docs/, no diff
 ```
 
-The detector runs on its own too:
+The detector and the confirm step run on their own too:
 
 ```bash
 node scripts/detect.js .                    # text report
 node scripts/detect.js . --json --worktree  # include uncommitted changes
 gh pr view --json body -q .body | node scripts/detect.js . --pr-body=-
+node scripts/detect.js . --json | node scripts/confirm.js   # findings confirmed by the small model
 ```
 
 ## What it checks
@@ -51,11 +54,46 @@ gh pr view --json body -q .body | node scripts/detect.js . --pr-body=-
 | `no-caller`, `unread-setting` | Added code nothing calls, settings nothing reads |
 | `dropped-rule` | Rules and reasons a doc or prompt rewrite removed |
 | `missing-companion` | Files declared or historically changed together, where the change edited one side |
+| `changelog-missing` | A user-visible change (CLI flag, env var, command, skill or agent file, package bin, or a `feat:`/`fix:`/`perf:` commit over code) with no entry under `Unreleased` |
+| `doc-example-stale` | A docs example running a command the change removed: a slash command whose file it deleted or renamed, or a package bin it took out of `package.json`. Flags the change removed or renamed show up as `stale-mention` |
+| `version-mismatch` | A package version moved in one manifest and not in another manifest with the same exact package name (plugin.json, marketplace.json, Cargo.toml, pyproject.toml; `@one/kit`, `kit`, `foo-bar` and `foo_bar` are four different names), or a new docs line pinning another version |
+| `duplicate-code` | Added code of 60 tokens and 6 distinct lines or more that already exists elsewhere in the repo, or twice in the change |
+| `complexity` | A function the change made too complex, as the language's linter measures it, on a line the change added: ruff (C901, PLR0912, PLR0913, PLR0915) for Python; the repository's eslint (`complexity` 10, `max-depth` 4, `max-params` 5) for JS/TS when it has an eslint config; golangci-lint (gocyclo, nestif) for Go; clippy `cognitive_complexity` for Rust. A language whose linter is missing is named under `skipped` |
+| `agent-config` | agnix errors in instruction files, skills, agents, commands, plugin manifests, hooks and MCP configs the change touched, when agnix is installed |
 | `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON |
 | `lint` | shellcheck, ruff and actionlint on added lines, when installed |
 | `em-dash` | House style; off with `.deslop.json` |
 
+`duplicate-code` and `complexity` skip tests, generated files and snapshot or dated record folders; the doc sync checks skip those folders too (`versioned_docs/`, `archive/`), and `version-mismatch` skips manifests under test and fixture paths, since they keep old flags and versions on purpose. With `--scope=repo` they audit the whole repository instead of a change. eslint, golangci-lint and clippy read the checked-out files, so `complexity` skips JS/TS, Go and Rust when `--head` names another revision; clippy builds the crate, so its first run on a cold cache takes as long as `cargo check`.
+
 Logic errors, edge cases and races need a reviewer, so deslop does not guess at them.
+
+## The small model
+
+`scripts/confirm.js` sends each finding, with the flagged line and two lines around it, to a small model and keeps only what it confirms. Fixes come back in `next-task:simple-fixer`'s format and are checked against the file before they are returned. It reads only files inside the repository: a path that leaves it or goes through a symlink gets no context and no fix. It runs, in this order:
+
+1. `--cmd='["codex", "exec", "-p", "luna", "{prompt}"]'`: the command as a JSON array of strings, run without a shell. An element that is exactly `{prompt}` becomes the prompt; with none, the prompt goes to stdin.
+2. `DESLOP_SMALL_CMD`: the same JSON array, from the environment.
+3. The `ladder.small` rung in [Tower Crane](https://github.com/agent-sh/tower-crane)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
+
+```json
+{ "harness": "codex", "ladder": { "small": { "profile": "luna", "effort": "low" } } }
+```
+
+| harness | command |
+|---|---|
+| `codex` | `codex exec -p <profile> <prompt>` (or `-m <model>`; `-c model_reasoning_effort=<effort>`) |
+| `claude` | `claude -p <prompt> --model <model>` (`--effort <effort>`) |
+| `opencode` | `opencode run <prompt> -m <model>` (`--variant <effort>`) |
+| `agy` | `agy -p <prompt> --model <model> --effort <effort>` |
+| `pi` | `pi -p <prompt> --model <model> --provider <provider> --thinking <effort>` |
+| `command` | the `command` array, with an element `{prompt}` replaced by the prompt (or the prompt on stdin) |
+
+The rung inherits the project's `harness` unless it names its own. Each rung comes from the project, then `GISHRA_CONFIG` (else `~/.config/gishra/config.json`), then the built-in Codex Luna rung. A configured rung that lacks the model, profile or command its harness needs, names an unsupported harness, or has fields that harness does not use is refused. Legacy `roles` files are refused; use `ladder`. Optional fields are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
+
+With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
+
+`detect.js --json` prints every finding unless `--max` is given (the default cap of 40 is for the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed, including a git, ripgrep or linter run that could not start, timed out, was killed or exited with an unexpected status, is carried into the result as `detectorErrors`, so a failed scan never reads as clean. What a check could not cover, such as a language whose linter is not installed or a symlinked path, is carried as `skipped`. Symlinked paths are excluded before every check, including agnix, and link targets are never read, even inside the repository.
 
 ## Configuration
 
@@ -76,6 +114,8 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 - Git and Node.js
 - [ripgrep](https://github.com/BurntSushi/ripgrep) recommended: on large repositories it is the difference between seconds and minutes
 - shellcheck, ruff and actionlint are used when installed
+- [agnix](https://github.com/agent-sh/agnix) is used for `agent-config` when installed
+- a small model for the confirm step (optional): a Tower Crane `ladder.small` rung, `DESLOP_SMALL_CMD` or `--cmd`
 
 ## Related plugins
 

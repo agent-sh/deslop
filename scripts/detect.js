@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { detect, formatText } = require('../detector');
-const { isRepo, git } = require('../detector/git');
+const { isRepo, git, isSymlink } = require('../detector/git');
 
 const HELP = `Usage: detect.js [repo] [options] [-- paths...]
 
@@ -26,7 +26,8 @@ Input
 
 Output
   --json              JSON instead of text
-  --max=N             findings to print (default 40)
+  --max=N             findings to print (default: 40 in text, all in JSON; a --max given
+                      with --json caps the JSON too, which confirm.js refuses)
 
 Config: .deslop.json at the repo root: {"ignore": [globs], "disable": [check ids], "style": {"emDash": false},
 "together": [{"when": glob, "also": glob, "message": text}], "mineCochange": false}.
@@ -76,7 +77,9 @@ function main(argv) {
     console.error('[WARN] paths are ignored in diff scope; use --scope=repo -- <paths> to scan files');
   }
   const cfgPath = path.join(root, '.deslop.json');
-  if (fs.existsSync(cfgPath)) {
+  if (isSymlink(root, '.deslop.json')) {
+    opts.skipped = ['symlink: .deslop.json not scanned'];
+  } else if (fs.existsSync(cfgPath)) {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     opts.ignore = cfg.ignore || [];
     opts.disable = cfg.disable || [];
@@ -84,6 +87,8 @@ function main(argv) {
     opts.together = cfg.together || [];
     if (cfg.mineCochange === false) opts.mineCochange = false;
   }
+  // JSON feeds the confirm step, which has to see every finding.
+  if (json && opts.max === undefined) opts.max = Infinity;
   const r = detect(root, opts);
   console.log(json ? JSON.stringify(r, null, 2) : formatText(r));
   return 0;
