@@ -7,6 +7,9 @@
 - `scripts/confirm.js`: a small model confirms the detector's findings and returns fixes, each checked against the file. The model is an argv array, never a shell string: `--cmd` or `DESLOP_SMALL_CMD` as JSON, or the gishra `small` role (`claude`, `codex`, `opencode`, `agy`, `pi` or a `command` array, with optional model, profile, provider, effort and args); the prompt is one element or stdin. With no model configured it prints the findings for the calling agent to judge. A reply that leaves any finding unjudged is rejected, input missing some of the detector's findings is refused, detector check failures are carried as `detectorErrors`, and prompts are batched by UTF-8 bytes to stay under the exec argument limit. Only files inside the repository are read for context or accepted as fix targets; symlinks are not followed.
 - `detect.js --json` prints every finding unless `--max` is given; the default cap of 40 applies to the text listing. Every git, ripgrep and linter run goes through one wrapper: one that could not start, timed out, was killed or exited with an unexpected status (ripgrep's unreadable-file exit 2 included) is a detector error instead of an empty result. `version-mismatch` ignores manifests under test and fixture paths.
 
+### Fixed
+- Detector worktree reads refuse symlinks, including symlinked parent directories, so outside file contents cannot become finding messages or excerpts. Confirmation preserves skipped-check notices and detector errors in fallback and dry-run output.
+
 ### Changed
 - `deslop-agent` no longer pins Sonnet; it inherits the session model and judges findings only when no small model is configured.
 - `--scope=repo` reads files in batches and skips lock, vendored and recorded-data files, which no check reads: on a 200,000-file repository it finishes in about half a minute instead of running out of memory.

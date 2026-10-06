@@ -367,16 +367,21 @@ function main(argv) {
   if (Array.isArray(report.errors) && report.errors.length) result.detectorErrors = report.errors.map(String);
   // Languages a check could not measure, so the summary does not imply they were covered.
   if (Array.isArray(report.skipped) && report.skipped.length) result.skipped = report.skipped.map(String);
+  const coverage = {
+    ...(result.detectorErrors ? { detectorErrors: result.detectorErrors } : {}),
+    ...(result.skipped ? { skipped: result.skipped } : {}),
+  };
   if (!items.length) { console.log(JSON.stringify(result, null, 2)); return 0; }
   const parts = batches(items, o.repo);
   const model = resolveModel(o, parts[0].prompt);
   if (o.dryRun) {
-    console.log(JSON.stringify(model ? { model: model.label, from: model.from, argv: model.argv, stdin: model.stdin, batches: parts.length } : { model: null }, null, 2));
+    console.log(JSON.stringify({ ...(model ? { model: model.label, from: model.from, argv: model.argv, stdin: model.stdin, batches: parts.length } : { model: null }), ...coverage }, null, 2));
     return 0;
   }
   if (!model) {
     console.log(`deslop-confirm: no small model configured (--cmd, DESLOP_SMALL_CMD or a gishra "small" role). Judge these ${items.length} findings yourself and build the DESLOP_RESULT block.\n`);
     if (result.detectorErrors) console.log(`The detector also failed in part; put these in "detectorErrors":\n${result.detectorErrors.map((e) => `- ${e}`).join('\n')}\n`);
+    if (result.skipped) console.log(`The detector did not cover these checks; put these in "skipped":\n${result.skipped.map((s) => `- ${s}`).join('\n')}\n`);
     console.log(parts.map((p) => p.prompt).join('\n'));
     return 0;
   }

@@ -183,6 +183,20 @@ describe('second review round', () => {
     expect(checks).not.toContain('missing-path');
     expect(checks).not.toContain('broken-file');
   });
+
+  test('worktree content and size reads refuse internal links, linked parents and traversal', () => {
+    const { BlobReader } = require('../detector/git');
+    const root = repo({ 'README.md': 'ordinary file\n' }, {}, { commit: false });
+    const outside = repo({ 'secret.txt': 'outside contents\n' }, {}, { commit: false });
+    fs.symlinkSync(path.join(root, 'README.md'), path.join(root, 'internal.md'));
+    fs.symlinkSync(outside, path.join(root, 'linked'));
+    fs.symlinkSync('missing.txt', path.join(root, 'dangling.md'));
+    fs.symlinkSync('loop.md', path.join(root, 'loop.md'));
+    const reader = new BlobReader(root, null);
+    const paths = ['internal.md', 'linked/secret.txt', path.relative(root, path.join(outside, 'secret.txt')), 'dangling.md', 'loop.md', 'README.md'];
+    expect(reader.readMany(paths)).toEqual([null, null, null, null, null, 'ordinary file\n']);
+    expect(reader.sizes(paths)).toEqual([null, null, null, null, null, Buffer.byteLength('ordinary file\n')]);
+  });
 });
 
 describe('references', () => {

@@ -1,12 +1,13 @@
 'use strict';
 // The confirm step: a stand-in model command replies, and the result must hold only what the
 // reply and the files support. No real model is called.
-const { spawnSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const CONFIRM = path.join(__dirname, '..', 'scripts', 'confirm.js');
+const DETECT = path.join(__dirname, '..', 'scripts', 'detect.js');
 const TMP = process.env.DESLOP_TEST_TMP || os.tmpdir();
 const dirs = [];
 
@@ -136,6 +137,64 @@ test('with no model configured the findings are printed for the caller to judge'
   expect(r.stdout).toContain('>     3 | See path/to/example.js');
 });
 
+test.each(['tracked', 'untracked'])('the detector-to-model pipeline never discloses a %s outside symlink', (tracking) => {
+  const root = workspace({ ...files, 'scripts/old.sh': '#!/bin/sh\n' });
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { stdio: 'pipe' });
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 't@example.com');
+  git('config', 'user.name', 't');
+  git('config', 'commit.gpgsign', 'false');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'base');
+  git('checkout', '-q', '-b', 'feature');
+  fs.unlinkSync(path.join(root, 'scripts/old.sh'));
+  const secret = 'REVKEY42';
+  const outside = workspace({ 'key.json': `{"${secret}": }\n`, 'key.md': `${secret} repeated prose\n${secret} repeated prose\n` });
+  const file = tracking === 'tracked' ? 'config/key.json' : 'docs/key.md';
+  fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+  fs.symlinkSync(path.join(outside, path.basename(file)), path.join(root, file));
+  if (tracking === 'tracked') git('add', file);
+  // A real local finding ensures confirmation actually invokes the stand-in model.
+  fs.writeFileSync(path.join(root, 'docs/local.md'), 'Local repeated prose\nLocal repeated prose\n');
+  const detected = spawnSync('node', [DETECT, root, '--base=main', '--worktree', '--json'], { encoding: 'utf8' });
+  expect(detected.status).toBe(0);
+  const rep = JSON.parse(detected.stdout);
+  const model = argvModel(root);
+  const r = confirm(root, '', [`--cmd=${JSON.stringify(['node', model])}`], { NOT_IN_PROMPT: secret }, rep);
+  expect(r.status).toBe(0);
+  const out = JSON.parse(r.stdout);
+  expect(out.error).toBeUndefined();
+  expect(out.summary.confirmed).toBeGreaterThan(0);
+  expect(rep.items).toEqual(expect.arrayContaining([expect.objectContaining({ check: 'duplicate-line', file: 'docs/local.md' })]));
+  expect(detected.stdout).not.toContain(secret);
+});
+
+test.each(['fallback', 'empty', 'model', 'failed-model', 'dry-run', 'dry-run-no-model'])('coverage notices survive the %s output path', (mode) => {
+  const root = workspace(files);
+  const rep = {
+    ...report,
+    errors: ['duplicates: git grep failed'],
+    skipped: ['complexity: JavaScript/TypeScript not measured (the repository has no eslint config)'],
+  };
+  if (mode === 'empty') { rep.items = []; rep.total = 0; }
+  const args = [];
+  if (['model', 'failed-model', 'dry-run'].includes(mode)) args.push(`--cmd=${fakeModel(root)}`);
+  if (mode.startsWith('dry-run')) args.push('--dry-run');
+  const reply = mode === 'failed-model' ? 'invalid reply' : JSON.stringify({ confirmed: [1, 2], dismissed: [], fixes: [] });
+  const r = confirm(root, reply, args, {}, rep);
+  expect(r.status).toBe(0);
+  if (mode === 'fallback') {
+    expect(r.stdout).toContain('put these in "detectorErrors"');
+    expect(r.stdout).toContain('put these in "skipped"');
+    expect(r.stdout).toContain(rep.errors[0]);
+    expect(r.stdout).toContain(rep.skipped[0]);
+  } else {
+    const out = JSON.parse(r.stdout);
+    expect(out.detectorErrors).toEqual(rep.errors);
+    expect(out.skipped).toEqual(rep.skipped);
+  }
+});
+
 test('the gishra small role runs a command harness with the prompt substituted', () => {
   const root = workspace(files);
   const state = path.join(root, 'state');
@@ -183,6 +242,7 @@ if (args.length > 1) { console.error('expected one argument, got ' + args.length
 const prompt = args.length ? args[0] : fs.readFileSync(0, 'utf8');
 if (!prompt.startsWith('You are confirming findings from deslop')) { console.error('not the prompt: ' + prompt.slice(0, 80)); process.exit(5); }
 if (process.env.EXPECT_LINE && !prompt.includes(process.env.EXPECT_LINE)) { console.error('context line altered'); process.exit(6); }
+if (process.env.NOT_IN_PROMPT && prompt.includes(process.env.NOT_IN_PROMPT)) { console.error('prompt holds text from outside the repo'); process.exit(4); }
 if (Buffer.byteLength(prompt) > 96 * 1024) { console.error('prompt over 96 KiB'); process.exit(7); }
 if (process.env.CALLS) fs.appendFileSync(process.env.CALLS, Buffer.byteLength(prompt) + '\\n');
 const ids = [...prompt.matchAll(/^\\[(\\d+)\\] /gm)].map((m) => Number(m[1]));

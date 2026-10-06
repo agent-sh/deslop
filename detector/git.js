@@ -39,10 +39,16 @@ function listFiles(root, rev) {
   return out.split('\0').filter(Boolean);
 }
 
-// A path that is not there reads as null; any other failure to read is an error.
-function readDisk(file, read) {
-  try { return read(file); } catch (e) {
-    if (['ENOENT', 'ENOTDIR', 'EISDIR'].includes(e.code)) return null;
+// Missing paths and symlinks (including a symlinked parent) read as null. Detector evidence
+// reaches the model, so refuse links outright, just like confirm's context and fix reads.
+function readDisk(root, p, read) {
+  const file = path.resolve(root, p);
+  if (!file.startsWith(root + path.sep)) return null;
+  try {
+    if (fs.realpathSync(file) !== file) return null;
+    return read(file);
+  } catch (e) {
+    if (['ENOENT', 'ENOTDIR', 'EISDIR', 'ELOOP'].includes(e.code)) return null;
     throw e;
   }
 }
@@ -51,7 +57,7 @@ const textOf = (buf) => (buf.subarray(0, 8000).includes(0) ? null : buf.toString
 
 class BlobReader {
   constructor(root, rev) {
-    this.root = root;
+    this.root = fs.realpathSync(root);
     this.rev = rev;
     this.cache = new Map();
   }
@@ -77,7 +83,7 @@ class BlobReader {
       }
     } else {
       for (const p of want) {
-        const buf = readDisk(path.join(this.root, p), fs.readFileSync);
+        const buf = readDisk(this.root, p, fs.readFileSync);
         this.cache.set(p, buf === null ? null : textOf(buf));
       }
     }
@@ -92,7 +98,7 @@ class BlobReader {
       return paths.map((_, i) => (/^\d+$/.test(lines[i] || '') ? Number(lines[i]) : null));
     }
     return paths.map((p) => {
-      const st = readDisk(path.join(this.root, p), fs.statSync);
+      const st = readDisk(this.root, p, fs.statSync);
       return st && st.size;
     });
   }
