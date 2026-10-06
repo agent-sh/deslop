@@ -60,6 +60,30 @@ class BlobReader {
     this.cache.set(path, text);
     return text;
   }
+  // Many blobs in one git process; one spawn per file is too slow for a few thousand files.
+  readMany(paths) {
+    const want = paths.filter((p) => !this.cache.has(p));
+    if (this.rev && want.length > 1) {
+      const r = spawnSync('git', ['-C', this.root, 'cat-file', '--batch'], { input: want.map((p) => `${this.rev}:${p}`).join('\n') + '\n', maxBuffer: 4 * MAX });
+      if (r.status === 0) {
+        const out = r.stdout;
+        let pos = 0;
+        for (const p of want) {
+          const nl = out.indexOf(10, pos);
+          if (nl < 0) break;
+          const header = out.subarray(pos, nl).toString('utf8');
+          pos = nl + 1;
+          const m = / blob (\d+)$/.exec(header);
+          if (!m) { this.cache.set(p, null); continue; }
+          const size = Number(m[1]);
+          const buf = out.subarray(pos, pos + size);
+          pos += size + 1;
+          this.cache.set(p, buf.subarray(0, 8000).includes(0) ? null : buf.toString('utf8'));
+        }
+      }
+    }
+    return paths.map((p) => this.read(p));
+  }
 }
 
 const EXCLUDE_GLOBS = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'Cargo.lock', 'poetry.lock', 'uv.lock', 'go.sum', '*.min.js', '*.map', 'node_modules/**', 'vendor/**', 'third_party/**', 'dist/**']
@@ -143,4 +167,25 @@ function grepMany(root, rev, tokens, { pathspecs = [], tracked, untracked = fals
   return hits;
 }
 
-module.exports = { git, isRepo, defaultBase, mergeBase, listFiles, BlobReader, grepMany };
+// Files holding any of the fixed strings, for narrowing a scan before reading files.
+function filesWithAny(root, rev, tokens, { tracked, untracked = false } = {}) {
+  if (!tokens.length) return [];
+  if (!rev && haveRg()) {
+    const args = ['-l', '--null', '--no-config', '-F', '--hidden', '--path-separator', '/', '-f', '-', '-g', '!.git'];
+    for (const g of EXCLUDE_GLOBS) args.push('-g', `!${g}`);
+    args.push('.');
+    const r = spawnSync('rg', args, { cwd: root, input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX });
+    if (!r.error && r.status <= 2) {
+      return r.stdout.split('\0').filter(Boolean).map((f) => f.replace(/^\.\//, '')).filter((f) => !tracked || tracked.has(f));
+    }
+  }
+  const args = ['grep', '-l', '-I', '-F', '-z', '--full-name', '-f', '-'];
+  if (rev) args.push(rev);
+  else if (untracked) args.push('--untracked');
+  args.push('--', '.', ...EXCLUDE);
+  const r = spawnSync('git', ['-C', root, ...args], { input: tokens.join('\n') + '\n', encoding: 'utf8', maxBuffer: MAX, timeout: SLOW_SEARCH_MS });
+  if (r.status !== 0) return [];
+  return r.stdout.split('\0').filter(Boolean).map((f) => (rev && f.startsWith(rev + ':') ? f.slice(rev.length + 1) : f));
+}
+
+module.exports = { git, isRepo, defaultBase, mergeBase, listFiles, BlobReader, grepMany, filesWithAny };

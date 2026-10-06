@@ -387,6 +387,167 @@ describe('companions', () => {
   });
 });
 
+describe('doc sync', () => {
+  const changelog = '# Changelog\n\n## [Unreleased]\n\n## [1.0.0]\n- First release.\n';
+
+  test('a new CLI flag with no changelog entry; an entry, a moved flag or a release-time changelog stay quiet', () => {
+    const base = { 'CHANGELOG.md': changelog, 'src/cli.js': "program.option('--alpha', 'a');\n", 'src/extra.js': "program.option('--gamma-mode', 'g');\n" };
+    const missing = repo(base, { 'src/cli.js': "program.option('--alpha', 'a');\nprogram.option('--beta-mode', 'b');\n" });
+    const item = detect(missing).find((i) => i.check === 'changelog-missing');
+    expect(item).toMatchObject({ file: 'CHANGELOG.md', line: 3 });
+    expect(item.message).toContain('--beta-mode');
+    const noted = repo(base, { 'src/cli.js': "program.option('--alpha', 'a');\nprogram.option('--beta-mode', 'b');\n", 'CHANGELOG.md': changelog.replace('## [Unreleased]\n', '## [Unreleased]\n\n- `--beta-mode`.\n') });
+    expect(detect(noted).some((i) => i.check === 'changelog-missing')).toBe(false);
+    const moved = repo(base, { 'src/extra.js': '', 'src/cli.js': "program.option('--alpha', 'a');\nprogram.option('--gamma-mode', 'g');\n" });
+    expect(detect(moved).some((i) => i.check === 'changelog-missing')).toBe(false);
+    const generated = repo({ ...base, 'CHANGELOG.md': '# Changelog\n\n## 1.0.0\n- First release.\n' }, { 'src/cli.js': "program.option('--alpha', 'a');\nprogram.option('--beta-mode', 'b');\n" });
+    expect(detect(generated).some((i) => i.check === 'changelog-missing')).toBe(false);
+  });
+
+  test('a feat commit over code with no changelog entry; a refactor commit stays quiet', () => {
+    const base = { 'CHANGELOG.md': changelog, 'src/core.js': 'module.exports = 0;\n' };
+    const feat = repo(base, { 'src/core.js': 'module.exports = 1;\n' }, { message: 'feat(core): return one' });
+    const item = detect(feat).find((i) => i.check === 'changelog-missing');
+    expect(item.message).toContain('commits "feat(core): return one"');
+    const refactor = repo(base, { 'src/core.js': 'module.exports = 1;\n' }, { message: 'refactor: return one' });
+    expect(detect(refactor).some((i) => i.check === 'changelog-missing')).toBe(false);
+  });
+
+  test('a docs example passes a flag our CLI does not define; other tools and defined flags pass', () => {
+    const root = repo(
+      { 'package.json': '{"name": "tool", "version": "1.0.0", "bin": {"tool": "cli.js"}}\n', 'cli.js': "if (args.includes('--json')) print();\nconst maxCount = opts['max-count'];\n", 'README.md': '# tool\n' },
+      { 'README.md': '# tool\n\n```\ntool --json --max-count=3 --fast-mode\ngit push --force-with-lease\n```\n\nOr run `tool --dry-plan`.\n' },
+    );
+    const stale = detect(root).filter((i) => i.check === 'doc-example-stale').map((i) => `${i.line}:${i.token}`);
+    expect(stale).toEqual(['4:--fast-mode', '8:--dry-plan']);
+  });
+
+  test('a slash command whose file this change deleted is still invoked in a doc', () => {
+    const root = repo(
+      { 'commands/old-scan.md': '# old\n', 'README.md': 'Run `/old-scan` first.\nSee src/old-scan for code.\n', 'CHANGELOG.md': '- `/old-scan` added.\n' },
+      { 'commands/old-scan.md': null, 'commands/scan.md': '# scan\n' },
+    );
+    const items = detect(root).filter((i) => i.check === 'doc-example-stale');
+    expect(items.map((i) => `${i.file}:${i.line}`)).toEqual(['README.md:1']);
+  });
+
+  test('a version moved in one manifest and not in the plugin manifest of the same package', () => {
+    const root = repo(
+      { 'package.json': '{\n  "name": "@scope/kit",\n  "version": "1.0.0"\n}\n', '.claude-plugin/plugin.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n', 'other/package.json': '{\n  "name": "other",\n  "version": "1.0.0"\n}\n' },
+      { 'package.json': '{\n  "name": "@scope/kit",\n  "version": "1.1.0"\n}\n' },
+    );
+    const items = detect(root).filter((i) => i.check === 'version-mismatch');
+    expect(items.map((i) => `${i.file}:${i.line}:${i.severity}`)).toEqual(['.claude-plugin/plugin.json:3:high']);
+    expect(items[0].fix).toEqual({ fixType: 'replace-token', from: '1.0.0', to: '1.1.0' });
+  });
+
+  test('a new install line pins an old version of our package; the current one and other packages pass', () => {
+    const root = repo(
+      { 'package.json': '{\n  "name": "kit",\n  "version": "2.0.0"\n}\n', 'README.md': '# kit\n' },
+      { 'README.md': '# kit\n\nnpm i kit@1.9.0\nnpm i kit@2.0.0\nnpm i lodash@1.9.0\n' },
+    );
+    const items = detect(root).filter((i) => i.check === 'version-mismatch');
+    expect(items.map((i) => `${i.line}:${i.severity}`)).toEqual(['3:review']);
+  });
+});
+
+describe('code shape', () => {
+  const block = (name, label) => [
+    `function ${name}(items, options) {`,
+    '  const seen = new Set();',
+    '  const out = [];',
+    '  for (const item of items) {',
+    '    if (seen.has(item.id)) continue;',
+    '    seen.add(item.id);',
+    `    const score = item.weight * options.scale + options.offset;`,
+    `    if (score < options.floor) { log("${label} below floor", item.id); continue; }`,
+    '    out.push({ id: item.id, score, tags: item.tags.filter(Boolean) });',
+    '  }',
+    '  out.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));',
+    '  return out.slice(0, options.limit);',
+    '}',
+  ].join('\n');
+
+  test('added code that repeats existing code names the other place; a table of same-shaped rows and test code do not', () => {
+    const root = repo(
+      { 'src/rank.js': `${block('rankItems', 'rank')}\nmodule.exports = { rankItems };\n` },
+      {
+        'src/score.js': `${block('scoreItems', 'score')}\nmodule.exports = { scoreItems };\n`,
+        'src/table.js': Array.from({ length: 14 }, (_, i) => `register("name${i}", handler, ${i}, { retries: 2, timeout: 30 });`).join('\n') + '\n',
+        'tests/rank.test.js': `${block('rankAgain', 'test')}\n`,
+      },
+    );
+    const items = detect(root).filter((i) => i.check === 'duplicate-code');
+    expect(items.map((i) => i.file)).toEqual(['src/score.js']);
+    expect(items[0].message).toContain('lines 2-13 repeat src/rank.js:2-13');
+  });
+
+  test('the same block added twice in one change is reported once, on the later copy', () => {
+    const root = repo({ 'README.md': 'x\n' }, { 'src/a.js': `${block('first', 'a')}\n`, 'src/b.js': `${block('second', 'b')}\n` });
+    const items = detect(root).filter((i) => i.check === 'duplicate-code');
+    expect(items.map((i) => `${i.file}:${i.token}`)).toEqual(['src/b.js:src/a.js:2']);
+  });
+
+  test('a function this change made long, deep or wide; one that was already long, a callback, tests and generated code pass', () => {
+    const body = (n) => Array.from({ length: n }, (_, i) => `    total += ${i}`).join('\n');
+    const longPy = `def build(rows):\n    total = 0\n${body(90)}\n    return total\n`;
+    const deepRs = 'fn walk(v: &[u8]) {\n    for a in v {\n        if *a > 0 {\n            while true {\n                match a {\n                    1 => {\n                        if a > &2 {\n                            loop {\n                                if a > &3 { break; }\n                            }\n                        }\n                    }\n                    _ => {}\n                }\n            }\n        }\n    }\n}\n';
+    const root = repo(
+      { 'src/old.py': `def legacy(rows):\n    total = 0\n${body(85)}\n    return total\n`, 'src/w.js': 'function wide(a, b) {\n  return a + b;\n}\nwide(1, 2);\n' },
+      {
+        'src/build.py': longPy,
+        'src/old.py': `def legacy(rows):\n    total = 1\n${body(85)}\n    return total\n`,
+        'src/w.js': 'function wide(a, b, c, d, e, f, g) {\n  return a + b + c + d + e + f + g;\n}\nwide(1, 2, 3, 4, 5, 6, 7);\n',
+        'src/walk.rs': deepRs,
+        'tests/test_build.py': longPy,
+        'src/gen.py': `# Code generated by protoc. DO NOT EDIT.\n${longPy}`,
+        // A callback restarts the count, so the blocks around it do not add to its own.
+        'src/n.js': 'function run(items) {\n  if (items) {\n    for (const x of items) {\n      while (x) {\n        if (x.a) {\n          x.list.forEach((y) => {\n            if (y) {\n              if (y.b) {\n                use(y);\n              }\n            }\n          });\n        }\n      }\n    }\n  }\n}\nrun([]);\n',
+      },
+    );
+    const items = detect(root).filter((i) => i.check === 'complexity');
+    expect(items.map((i) => `${i.file}:${i.line}`).sort()).toEqual(['src/build.py:1', 'src/w.js:1', 'src/walk.rs:1']);
+    const msg = Object.fromEntries(items.map((i) => [i.file, i.message]));
+    expect(msg['src/build.py']).toContain('93 lines');
+    expect(msg['src/w.js']).toContain('takes 7 parameters');
+    expect(msg['src/walk.rs']).toContain('nests control flow 7 deep (line 9)');
+  });
+
+});
+
+describe('agent config', () => {
+  const skill = '---\nname: Bad Name\ndescription: does things\n---\n\nBody.\n';
+  // A stand-in agnix that reports fixed diagnostics, so the mapping is tested without the real tool.
+  function fakeAgnix(dir) {
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    const out = JSON.stringify({ diagnostics: [
+      { level: 'error', rule: 'AS-004', file: 'skills/x/SKILL.md', line: 2, message: 'bad name', rule_severity: 'HIGH' },
+      { level: 'warning', rule: 'PE-004', file: 'skills/x/SKILL.md', line: 3, message: 'ambiguous term', rule_severity: 'MEDIUM' },
+      { level: 'error', rule: 'CC-MEM-001', file: 'AGENTS.md', line: 1, message: 'old problem', rule_severity: 'HIGH' },
+    ] });
+    fs.writeFileSync(path.join(bin, 'agnix'), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "agnix 0.0.0"; exit 0; fi\ncat <<'EOF'\n${out}\nEOF\nexit 1\n`, { mode: 0o755 });
+    return bin;
+  }
+  const basePath = [path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter);
+
+  test('agnix errors on changed agent files map to findings, MEDIUM warnings do not; without agnix the check is silent', () => {
+    const root = repo({ 'AGENTS.md': '# Rules\n\n- one\n' }, { 'skills/x/SKILL.md': skill, 'AGENTS.md': '# Rules\n\n- one\n- two\n' });
+    const bin = fakeAgnix(root + '-tools');
+    roots.push(root + '-tools');
+    const run = (PATH) => {
+      const r = spawnSync('node', [DETECT, root, '--base=main', '--json'], { encoding: 'utf8', env: { ...process.env, PATH } });
+      expect(r.status).toBe(0);
+      return JSON.parse(r.stdout);
+    };
+    const items = run(`${bin}${path.delimiter}${basePath}`).items.filter((i) => i.check === 'agent-config');
+    expect(items.map((i) => `${i.file}:${i.line}:${i.severity}:${i.token}`).sort()).toEqual(['AGENTS.md:1:review:CC-MEM-001', 'skills/x/SKILL.md:2:high:AS-004']);
+    const without = run(basePath);
+    expect(without.items.filter((i) => i.check === 'agent-config')).toEqual([]);
+    expect(without.errors).toEqual([]);
+  });
+});
+
 describe('files', () => {
   test('JSONC config is not a broken file; invalid JSON is', () => {
     const root = repo({ 'README.md': 'x\n' }, { '.devcontainer/devcontainer.json': '{\n  // image\n  "image": "x",\n}\n', 'tsconfig.json': '{ /* strict */ "compilerOptions": {} }\n', 'config/app.json': '{"a": }\n', 'package.json': '{"name": "x",}\n' });

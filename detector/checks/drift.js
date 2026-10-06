@@ -3,15 +3,12 @@
 // function, flag or environment variable, or a value replaced by another (version, count,
 // name). Mentions in prose and settings are what no compiler or test catches.
 const path = require('path');
-const { tokens, tokenType, lang, SKIP_KINDS } = require('../files');
+const { tokens, tokenType, lang, SKIP_KINDS, ENV_READ, OPTION_DEF, FLAG_NAME, SNAPSHOT } = require('../files');
 
 const WORD = /[A-Za-z0-9_]+/g;
 const PROSE = new Set(['docs', 'prompt', 'config', 'ci', 'other']);
 // A line that records history (dated entry, "removed", "formerly") may name old things.
 const HISTORY = /\b(removed|deleted|retired|renamed|replaced|superseded|formerly|previously|no longer|used to|once had|deprecated|legacy|was moved)\b|\b20\d\d-[01]\d-[0-3]\d\b/i;
-// Frozen copies (versioned docs, archives) are meant to keep old values.
-// Dated folders and files (lane-20260912/, PLAN-20260919.md) are records of their day.
-const SNAPSHOT = /(^|\/)(versioned_docs|versioned_sidebars|archive|archived|snapshots?)\/|(^|\/)(version-|v)\d+(\.\d+)+\/|(^|\/)[^/]*20\d\d[01]\d[0-3]\d[^/]*(\/|\.md$)/;
 
 const DEFS = {
   js: [/^\s*(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/, /^\s*(?:export\s+)?(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/],
@@ -21,8 +18,6 @@ const DEFS = {
   sh: [/^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)/],
   c: [/^\s*(?:class|struct|enum)\s+([A-Za-z_]\w*)/, /^#define\s+([A-Za-z_]\w*)/],
 };
-const ENV_READ = /process\.env(?:\.([A-Z][A-Z0-9_]+)|\[['"]([A-Z][A-Z0-9_]+)['"]\])|os\.environ(?:\.get)?[[(]\s*['"]([A-Z][A-Z0-9_]+)['"]|os\.getenv\(\s*['"]([A-Z][A-Z0-9_]+)['"]|env::var(?:_os)?\(\s*"([A-Z][A-Z0-9_]+)"|getenv\(\s*"([A-Z][A-Z0-9_]+)"|\$\{([A-Z][A-Z0-9_]+):[-=?+]/g;
-const OPTION_DEF = /add_argument\(|\.option\(|\.requiredOption\(|\blong\s*[(=]|#\[arg\b|#\[clap\b|argv\.includes\(|args\.includes\(|case\s+["']?--|^\s*["']?--[a-z][\w-]*["']?\s*[:)|]/;
 
 function similar(a, b) {
   const wa = new Set(a.match(WORD) || []);
@@ -44,7 +39,7 @@ function definedNames(text, l) {
     const n = m.slice(1).find(Boolean);
     if (n && n.includes('_')) out.push(n);
   }
-  if (OPTION_DEF.test(text)) for (const m of text.matchAll(/--[a-z][a-z0-9]*(?:-[a-z0-9]+)+|--[a-z][a-z0-9]{3,}/g)) out.push(m[0]);
+  if (OPTION_DEF.test(text)) for (const m of text.matchAll(FLAG_NAME)) out.push(m[0]);
   return out.filter((n) => tokenType(n) !== 'ident' || /[_A-Z]/.test(n.slice(1)) || n.length >= 8);
 }
 
@@ -273,6 +268,8 @@ module.exports = {
           token: t,
           fix: v.to ? { fixType: 'replace-token', from: t, to: v.to } : undefined,
           more: hs.length - shown.length,
+          // The line whose change made this one stale, for whoever confirms the finding.
+          changed: v.why === 'file' ? undefined : { file: v.from, line: v.line, before: v.text.trim(), after: v.why === 'replaced' ? ((ctx.lines(v.from) || [])[v.line - 1] || '').trim() : undefined },
         });
       }
     }

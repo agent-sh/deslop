@@ -77,6 +77,17 @@ const VERSION = /(?<![\w.])v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?![\w.])/g;
 const QUOTED_DASHED = /[`'"]([a-z][a-z0-9]*(?:[-.][a-z0-9]+)+)[`'"]/g;
 const NUMBER = /(?<![\w.,#])\d{1,3}(?:,\d{3})+(?![\d,])|(?<![\w.,#])\d{3,}(?:\.\d+)?(?![\w.])|(?<![\w.,#])\d+\.\d{2,}(?![\w.])/g;
 
+// Frozen copies (versioned docs, archives) are meant to keep old values and old code.
+// Dated folders and files (lane-20260912/, PLAN-20260919.md) are records of their day.
+const SNAPSHOT = /(^|\/)(versioned_docs|versioned_sidebars|archive|archived|snapshots?)\/|(^|\/)(version-|v)\d+(\.\d+)+\/|(^|\/)[^/]*20\d\d[01]\d[0-3]\d[^/]*(\/|\.md$)/;
+
+// Environment reads in code, one capture group per language form.
+const ENV_READ = /process\.env(?:\.([A-Z][A-Z0-9_]+)|\[['"]([A-Z][A-Z0-9_]+)['"]\])|os\.environ(?:\.get)?[[(]\s*['"]([A-Z][A-Z0-9_]+)['"]|os\.getenv\(\s*['"]([A-Z][A-Z0-9_]+)['"]|env::var(?:_os)?\(\s*"([A-Z][A-Z0-9_]+)"|getenv\(\s*"([A-Z][A-Z0-9_]+)"|\$\{([A-Z][A-Z0-9_]+):[-=?+]/g;
+// A line that defines a command-line option (argparse, commander, clap, hand-rolled argv checks, shell case arms).
+const OPTION_DEF = /add_argument\(|\.option\(|\.requiredOption\(|\blong\s*[(=]|#\[arg\b|#\[clap\b|argv\.includes\(|args\.includes\(|case\s+["']?--|^\s*["']?--[a-z][\w-]*["']?\s*[:)|]/;
+// Long flags specific enough to track: dashed, or at least four letters.
+const FLAG_NAME = /--[a-z][a-z0-9]*(?:-[a-z0-9]+)+|--[a-z][a-z0-9]{3,}/g;
+
 const STOP = new Set(['__init__', '__name__', '__main__', '__dirname', '__filename', 'module_exports', 'node_modules', 'TODO_', 'README']);
 
 function isSpecificIdent(t) {
@@ -113,4 +124,4 @@ function tokenType(t) {
   return 'ident';
 }
 
-module.exports = { kind, lang, commentOf, tokens, tokenType, TEXT_KINDS, SKIP_KINDS };
+module.exports = { kind, lang, commentOf, tokens, tokenType, TEXT_KINDS, SKIP_KINDS, ENV_READ, OPTION_DEF, FLAG_NAME, SNAPSHOT };

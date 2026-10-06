@@ -2,9 +2,9 @@
 // Builds the shared context every check reads: the parsed diff, file sets at both ends,
 // blob readers, and the PR text (body plus commit messages).
 const path = require('path');
-const { git, defaultBase, mergeBase, listFiles, BlobReader, grepMany } = require('./git');
+const { git, defaultBase, mergeBase, listFiles, BlobReader, grepMany, filesWithAny } = require('./git');
 const { parseDiff } = require('./diff');
-const { kind } = require('./files');
+const { kind, SKIP_KINDS } = require('./files');
 
 function buildContext(root, opts) {
   const ctx = { root, opts, scope: opts.scope };
@@ -17,6 +17,7 @@ function buildContext(root, opts) {
   const grepRev = ctx.head && ctx.head !== 'HEAD' ? ctx.head : null;
   // In work-tree mode untracked files are part of the change, so the search covers them too.
   ctx.grep = (tokens, o = {}) => grepMany(root, grepRev, tokens, { ...o, tracked: ctx.headFiles, untracked: !ctx.head });
+  ctx.filesWith = (tokens) => filesWithAny(root, grepRev, tokens, { tracked: ctx.headFiles, untracked: !ctx.head });
   ctx.dirs = new Set();
   for (const f of ctx.headFiles) {
     const parts = f.split('/');
@@ -64,13 +65,19 @@ function buildContext(root, opts) {
     const selected = opts.paths && opts.paths.length
       ? [...ctx.headFiles].filter((f) => opts.paths.some((p) => f === p || f.startsWith(p.replace(/\/$/, '') + '/')))
       : [...ctx.headFiles];
-    for (const p of selected) {
-      const k = kind(p);
-      if (k === 'lock' || k === 'vendor') continue;
-      const text = ctx.headReader.read(p);
-      if (text === null || text.length > 2_000_000) continue;
-      const added = text.split('\n').map((t, i) => ({ line: i + 1, text: t }));
-      ctx.files.push({ path: p, oldPath: p, status: 'A', added, removed: [], blocks: [{ added, removed: [], newStart: 1 }], whole: true });
+    // Lock files, vendored code and recorded data are skipped by every check; on a large repo
+    // loading them anyway is most of the memory.
+    const wanted = selected.filter((p) => !SKIP_KINDS.has(kind(p)));
+    // One git process per chunk of files; one per file takes minutes on a large repository.
+    for (let c = 0; c < wanted.length; c += 2000) {
+      const chunk = wanted.slice(c, c + 2000);
+      const texts = ctx.headReader.readMany(chunk);
+      chunk.forEach((p, k) => {
+        const text = texts[k];
+        if (text === null || text.length > 2_000_000) return;
+        const added = text.split('\n').map((t, i) => ({ line: i + 1, text: t }));
+        ctx.files.push({ path: p, oldPath: p, status: 'A', added, removed: [], blocks: [{ added, removed: [], newStart: 1 }], whole: true });
+      });
     }
     ctx.commits = [];
   }

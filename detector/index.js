@@ -2,10 +2,10 @@
 // Runs the checks over a context and ranks what they report.
 const { buildContext } = require('./context');
 
-const CHECKS = ['drift', 'refs', 'anchors', 'unwired', 'text', 'tests', 'rewrite', 'secrets', 'tools', 'cochange'].map((id) => require(`./checks/${id}`));
+const CHECKS = ['drift', 'refs', 'anchors', 'unwired', 'text', 'tests', 'rewrite', 'secrets', 'tools', 'cochange', 'docsync', 'duplicates', 'complexity', 'agentconfig'].map((id) => require(`./checks/${id}`));
 
 // Order inside a severity: what most often turned out real in the evaluation set first.
-const PRIORITY = ['secret', 'merge-residue', 'broken-file', 'local-path', 'stale-mention', 'missing-path', 'broken-anchor', 'scope-claim', 'displaced-doc-comment', 'test-cannot-fail', 'review-provenance', 'duplicate-line', 'no-caller', 'unread-setting', 'test-swallows-failure', 'lint', 'dropped-rule', 'missing-companion', 'em-dash'];
+const PRIORITY = ['secret', 'merge-residue', 'broken-file', 'local-path', 'agent-config', 'stale-mention', 'version-mismatch', 'missing-path', 'broken-anchor', 'doc-example-stale', 'scope-claim', 'displaced-doc-comment', 'test-cannot-fail', 'review-provenance', 'duplicate-line', 'no-caller', 'unread-setting', 'test-swallows-failure', 'lint', 'changelog-missing', 'duplicate-code', 'complexity', 'dropped-rule', 'missing-companion', 'em-dash'];
 
 function globToRe(g) {
   const esc = g.replace(/[.+^$()|[\]\\]/g, '\\$&').replace(/\*\*\/?/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\u0000/g, '.*');
@@ -28,9 +28,10 @@ function detect(root, opts) {
     }
   }
   items = items.filter((it) => !disabled.has(it.check) && !ignore.some((re) => re.test(it.file)));
-  // A deleted path cited in a doc shows up as both a stale mention and a missing path; keep one.
+  // A deleted path cited in a doc shows up as both a stale mention and a missing path, and a
+  // removed flag in a docs example as a stale mention and a stale example; keep one.
   const stale = new Set(items.filter((it) => it.check === 'stale-mention').map((it) => `${it.file}|${it.line}|${it.token}`));
-  items = items.filter((it) => !(it.check === 'missing-path' && stale.has(`${it.file}|${it.line}|${it.token}`)));
+  items = items.filter((it) => !((it.check === 'missing-path' || it.check === 'doc-example-stale') && stale.has(`${it.file}|${it.line}|${it.token}`)));
   const seen = new Set();
   items = items.filter((it) => {
     const k = `${it.check}|${it.file}|${it.line}|${it.token || ''}`;
