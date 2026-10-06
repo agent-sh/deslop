@@ -26,7 +26,7 @@ Input
 
 Output
   --json              JSON instead of text
-  --max=N             findings to print (default 40)
+  --max=N             findings to print (default 40 in text; JSON has all of them)
 
 Config: .deslop.json at the repo root: {"ignore": [globs], "disable": [check ids], "style": {"emDash": false},
 "together": [{"when": glob, "also": glob, "message": text}], "mineCochange": false}.
@@ -84,6 +84,8 @@ function main(argv) {
     opts.together = cfg.together || [];
     if (cfg.mineCochange === false) opts.mineCochange = false;
   }
+  // JSON feeds the confirm step, which has to see every finding.
+  if (json && opts.max === undefined) opts.max = Infinity;
   const r = detect(root, opts);
   console.log(json ? JSON.stringify(r, null, 2) : formatText(r));
   return 0;

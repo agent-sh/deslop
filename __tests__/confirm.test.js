@@ -31,15 +31,16 @@ const report = {
 };
 const files = { 'docs/setup.md': '# Setup\nRun scripts/old.sh first.\nSee path/to/example.js\n' };
 
-// A model stand-in: prints the reply given in REPLY, after checking the prompt it got.
+// A model stand-in: prints the reply given in REPLY, after checking the prompt it got (its
+// argument when given one, else stdin). Returns the command as the JSON array --cmd takes.
 function fakeModel(root) {
   const p = path.join(root, 'model.js');
   fs.writeFileSync(p, `const fs = require('fs');
-const prompt = process.env.DESLOP_PROMPT || fs.readFileSync(0, 'utf8');
+const prompt = process.argv.length > 2 ? process.argv[2] : fs.readFileSync(0, 'utf8');
 if (!prompt.includes('[1] stale-mention (high) docs/setup.md:2') || !prompt.includes('>     2 | Run scripts/old.sh first.')) { console.error('bad prompt'); process.exit(3); }
 process.stdout.write(process.env.REPLY);
 `);
-  return `node ${p}`;
+  return JSON.stringify(['node', p]);
 }
 
 function confirm(root, reply, args = [], env = {}, rep = report) {
@@ -113,8 +114,8 @@ test('the gishra small role runs a command harness with the prompt substituted',
   const root = workspace(files);
   const state = path.join(root, 'state');
   fs.mkdirSync(state);
-  const model = fakeModel(root).split(' ');
-  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: { harness: 'command', command: ['sh', '-c', 'DESLOP_PROMPT="$1" exec "$0" "$2"', model[0], '{prompt}', model[1]] } } }));
+  const model = JSON.parse(fakeModel(root));
+  fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: { harness: 'command', command: [...model, '{prompt}'] } } }));
   const out = JSON.parse(confirm(root, JSON.stringify({ confirmed: [1, 2], dismissed: [], fixes: [] }), [], { GISHRA_STATE: state }).stdout);
   expect(out.error).toBeUndefined();
   expect(out.model).toBe('command');
@@ -145,17 +146,15 @@ describe('harness command shapes', () => {
   });
 });
 
-// A model stand-in that takes the prompt as its only argument (after an optional "P:" or
-// --prompt= prefix) or, with no argument, from stdin; it confirms every finding it was shown.
-// It exits non-zero when the prompt arrived split, altered, oversized or through the wrong
-// channel, which confirm.js turns into an "error".
+// A model stand-in that takes the prompt as its only argument or, with none, from stdin, and
+// confirms every finding it was shown. It exits non-zero when the prompt arrived split, altered
+// or oversized, which confirm.js turns into an "error".
 function argvModel(root) {
   const p = path.join(root, 'argv-model.js');
   fs.writeFileSync(p, `const fs = require('fs');
 const args = process.argv.slice(2);
 if (args.length > 1) { console.error('expected one argument, got ' + args.length); process.exit(3); }
-if (!args.length && process.env.DESLOP_PROMPT !== undefined) { console.error('DESLOP_PROMPT set for a stdin prompt'); process.exit(4); }
-const prompt = args.length ? args[0].replace(/^(P:|--prompt=)/, '') : fs.readFileSync(0, 'utf8');
+const prompt = args.length ? args[0] : fs.readFileSync(0, 'utf8');
 if (!prompt.startsWith('You are confirming findings from deslop')) { console.error('not the prompt: ' + prompt.slice(0, 80)); process.exit(5); }
 if (process.env.EXPECT_LINE && !prompt.includes(process.env.EXPECT_LINE)) { console.error('context line altered'); process.exit(6); }
 if (Buffer.byteLength(prompt) > 96 * 1024) { console.error('prompt over 96 KiB'); process.exit(7); }
@@ -166,23 +165,21 @@ process.stdout.write(JSON.stringify({ confirmed: ids, dismissed: [], fixes: [] }
   return p;
 }
 
-describe('the prompt reaches the model intact', () => {
-  // Quotes, a command substitution, backticks and a backslash: a shell that re-parsed the prompt
-  // would split it, drop characters or run the commands.
-  const hostile = `Run "$(touch PWNED1)" and 'single' \`touch PWNED2\` back\\slash $HOME *`;
+describe('the model command is an argv array', () => {
+  // Quotes, a command substitution, backticks and a backslash: anything that re-parsed the
+  // prompt would split it, drop characters or run the commands.
+  const hostile = `Run "$(touch PWNED1)" and 'single' \`touch PWNED2\` back\\slash $HOME * # don't`;
   const hostileFiles = { 'docs/setup.md': `# Setup\n${hostile}\nSee path/to/example.js\n` };
 
   test.each([
-    ['bare', (m) => `node ${m} {prompt}`],
-    ['double quotes', (m) => `node ${m} "{prompt}"`],
-    ['single quotes', (m) => `node ${m} '{prompt}'`],
-    ['inside a quoted word', (m) => `node ${m} "P:{prompt}"`],
-    ['inside a single-quoted word', (m) => `node ${m} 'P:{prompt}'`],
-    ['in a subshell', (m) => `(cd . && node ${m} {prompt})`],
-    ['on stdin, without {prompt}', (m) => `node ${m}`],
-  ])('shell command, %s', (_, cmd) => {
+    ['--cmd, prompt as an element', (m) => [`--cmd=${JSON.stringify(['node', m, '{prompt}'])}`], {}],
+    ['--cmd, prompt on stdin', (m) => [`--cmd=${JSON.stringify(['node', m])}`], {}],
+    ['DESLOP_SMALL_CMD', () => [], { DESLOP_SMALL_CMD: '%CMD%' }],
+  ])('%s', (_, args, env) => {
     const root = workspace(hostileFiles);
-    const r = confirm(root, '', [`--cmd=${cmd(argvModel(root))}`], { EXPECT_LINE: hostile });
+    const m = argvModel(root);
+    const e = Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.replace('%CMD%', JSON.stringify(['node', m, '{prompt}']))]));
+    const r = confirm(root, '', args(m), { ...e, EXPECT_LINE: hostile });
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.error).toBeUndefined();
@@ -191,36 +188,31 @@ describe('the prompt reaches the model intact', () => {
   });
 
   test.each([
-    ['command substitution', '"$(printf %s {prompt})"'],
-    ['backticks', '`printf %s {prompt}`'],
-    ['parameter expansion', '${X:-{prompt}}'],
-    ['a backslash escape', '\\{prompt}'],
-    ['ANSI-C quotes', "$'{prompt}'"],
-    ['a here-document', '<<EOF\n{prompt}\nEOF'],
-  ])('shell command with {prompt} in %s is refused', (_, arg) => {
+    ['a shell string', (m) => `node ${m} {prompt}`, /--cmd takes a non-empty JSON array of strings/],
+    ['an empty array', () => '[]', /--cmd takes a non-empty JSON array of strings/],
+    ['{prompt} inside an element', (m) => JSON.stringify(['node', m, '--prompt={prompt}']), /\{prompt\} must be a whole element/],
+    ['{prompt} inside a shell script', (m) => JSON.stringify(['sh', '-c', `node ${m} {prompt}`]), /\{prompt\} must be a whole element/],
+  ])('%s is refused', (_, cmd, why) => {
     const root = workspace(files);
-    const r = confirm(root, '', [`--cmd=node ${argvModel(root)} ${arg}`]);
+    const r = confirm(root, '', [`--cmd=${cmd(argvModel(root))}`]);
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/\{prompt\} in --cmd or DESLOP_SMALL_CMD can stand bare or inside/);
+    expect(r.stderr).toMatch(why);
   });
 
-  test('a command array passes {prompt} as one element and refuses it inside a shell script', () => {
+  test('the gishra command harness follows the same rule', () => {
     const root = workspace(hostileFiles);
     const state = path.join(root, 'state');
     fs.mkdirSync(state);
     const role = (command) => fs.writeFileSync(path.join(state, 'project.json'), JSON.stringify({ version: 1, roles: { small: { harness: 'command', command } } }));
     const m = argvModel(root);
-    for (const command of [['node', m, '{prompt}'], ['node', m, '--prompt={prompt}']]) {
-      role(command);
-      const out = JSON.parse(confirm(root, '', [], { GISHRA_STATE: state, EXPECT_LINE: hostile }).stdout);
-      expect(out.error).toBeUndefined();
-      expect(out.findings.map((f) => f.id)).toEqual([1, 2]);
-    }
+    role(['node', m, '{prompt}']);
+    const out = JSON.parse(confirm(root, '', [], { GISHRA_STATE: state, EXPECT_LINE: hostile }).stdout);
+    expect(out.error).toBeUndefined();
+    expect(out.findings.map((f) => f.id)).toEqual([1, 2]);
     role(['sh', '-c', `node ${m} {prompt}`]);
     const r = confirm(root, '', [], { GISHRA_STATE: state });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/takes \{prompt\} as a whole element/);
-    expect(fs.existsSync(path.join(root, 'PWNED1'))).toBe(false);
+    expect(r.stderr).toMatch(/\{prompt\} must be a whole element/);
   });
 });
 
@@ -234,7 +226,7 @@ describe('prompt size', () => {
     const root = workspace({ 'docs/zh.md': doc });
     const rep = { scope: 'diff', items: Array.from({ length: n }, (_, i) => ({ check: 'missing-path', severity: 'review', file: 'docs/zh.md', line: i * 5 + 3, message: `cites \`p${i}/x.js\`, which does not exist in this repo` })) };
     const calls = path.join(root, 'calls');
-    const r = confirm(root, '', [`--cmd=node ${argvModel(root)} {prompt}`], { CALLS: calls }, rep);
+    const r = confirm(root, '', [`--cmd=${JSON.stringify(['node', argvModel(root), '{prompt}'])}`], { CALLS: calls }, rep);
     const out = JSON.parse(r.stdout);
     expect(out.error).toBeUndefined();
     expect(out.findings.map((f) => f.id)).toEqual(Array.from({ length: n }, (_, i) => i + 1));
@@ -248,7 +240,7 @@ describe('prompt size', () => {
     const huge = '文'.repeat(60000); // 180 KB of message
     const rep = { scope: 'diff', items: [report.items[0], { ...report.items[1], message: huge }] };
     const calls = path.join(root, 'calls');
-    const r = confirm(root, '', [`--cmd=node ${argvModel(root)} {prompt}`], { CALLS: calls }, rep);
+    const r = confirm(root, '', [`--cmd=${JSON.stringify(['node', argvModel(root), '{prompt}'])}`], { CALLS: calls }, rep);
     const out = JSON.parse(r.stdout);
     expect(out.error).toBeUndefined();
     expect(out.findings.map((f) => f.id)).toEqual([1, 2]);

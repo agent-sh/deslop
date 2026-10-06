@@ -55,8 +55,8 @@ node scripts/detect.js . --json | node scripts/confirm.js   # findings confirmed
 | `dropped-rule` | Rules and reasons a doc or prompt rewrite removed |
 | `missing-companion` | Files declared or historically changed together, where the change edited one side |
 | `changelog-missing` | A user-visible change (CLI flag, env var, command, skill or agent file, package bin, or a `feat:`/`fix:`/`perf:` commit over code) with no entry under `Unreleased` |
-| `doc-example-stale` | A docs example passing a flag the repo's own CLI or slash command does not define, or invoking a slash command the change deleted. `--help` and `--version` come with every parser library and are not checked; a flag given to a command that hands its arguments to another program is REVIEW, not HIGH |
-| `version-mismatch` | A package version moved in one manifest and not in another manifest of the same package (plugin.json, marketplace.json, Cargo.toml, pyproject.toml; `@one/kit` and `@two/kit` are different packages), or a new docs line pinning another version |
+| `doc-example-stale` | A docs example running a command the change removed: a slash command whose file it deleted or renamed, or a package bin it took out of `package.json`. Flags the change removed or renamed show up as `stale-mention` |
+| `version-mismatch` | A package version moved in one manifest and not in another manifest with the same exact package name (plugin.json, marketplace.json, Cargo.toml, pyproject.toml; `@one/kit`, `kit`, `foo-bar` and `foo_bar` are four different names), or a new docs line pinning another version |
 | `duplicate-code` | Added code of 60 tokens and 6 distinct lines or more that already exists elsewhere in the repo, or twice in the change |
 | `complexity` | A function the change pushed past 80 lines, 5 levels of control-flow nesting or 6 parameters (JS/TS, Python, Rust, Go, shell) |
 | `agent-config` | agnix errors in instruction files, skills, agents, commands, plugin manifests, hooks and MCP configs the change touched, when agnix is installed |
@@ -72,8 +72,8 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 
 `scripts/confirm.js` sends each finding, with the flagged line and two lines around it, to a small model and keeps only what it confirms. Fixes come back in `next-task:simple-fixer`'s format and are checked against the file before they are returned. It runs, in this order:
 
-1. `--cmd="..."`: a shell command; `{prompt}` in it, bare or inside `"..."` or `'...'`, becomes the prompt as one argument, otherwise the prompt goes to stdin. A `{prompt}` inside `$(...)`, backticks or a here-document is refused.
-2. `DESLOP_SMALL_CMD`: the same, from the environment.
+1. `--cmd='["codex", "exec", "-p", "luna", "{prompt}"]'`: the command as a JSON array of strings, run without a shell. An element that is exactly `{prompt}` becomes the prompt; with none, the prompt goes to stdin.
+2. `DESLOP_SMALL_CMD`: the same JSON array, from the environment.
 3. The `small` role in [gishra](https://github.com/agent-sh/gishra)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
 
 ```json
@@ -87,11 +87,13 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 | `opencode` | `opencode run <prompt> -m <model>` (`--variant <effort>`) |
 | `agy` | `agy -p <prompt> --model <model> --effort <effort>` |
 | `pi` | `pi -p <prompt> --model <model> --provider <provider> --thinking <effort>` |
-| `command` | the `command` array, with an element `{prompt}` (or `--flag={prompt}`) replaced by the prompt |
+| `command` | the `command` array, with an element `{prompt}` replaced by the prompt (or the prompt on stdin) |
 
 Options missing from the role are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
 
 With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
+
+`detect.js --json` prints every finding (`--max` caps only the text listing), and `confirm.js` refuses input that holds fewer findings than the detector made. A check that failed is carried into the result as `detectorErrors`, so a failed scan never reads as clean.
 
 ## Configuration
 

@@ -6,19 +6,23 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const HELP = `Usage: confirm.js [--input=FILE] [--repo=DIR] [--cmd=COMMAND] [--mode=report|apply] [--dry-run] [--timeout=SECONDS]
+const HELP = `Usage: confirm.js [--input=FILE] [--repo=DIR] [--cmd=JSON] [--mode=report|apply] [--dry-run] [--timeout=SECONDS]
 
 Reads detector JSON (detect.js --json) from --input or stdin, asks a small model to confirm each
 finding, and prints the DESLOP_RESULT JSON: confirmed findings, dismissed ones with the reason,
 and fixes in simple-fixer form. Every fix is checked against the file before it is returned.
 
 The model command is the first of:
-  --cmd=COMMAND          a shell command; {prompt} in it (bare, or inside "..." or '...') becomes the
-                         prompt as one argument, otherwise the prompt is on stdin
+  --cmd=JSON             the command as a JSON array of strings, run without a shell; an element
+                         that is exactly "{prompt}" becomes the prompt, otherwise the prompt is on
+                         stdin. Example: --cmd='["codex", "exec", "-p", "luna", "{prompt}"]'
   DESLOP_SMALL_CMD       the same, from the environment
   the gishra "small" role in $GISHRA_STATE/project.json, or .gishra/project.json at the root of
                          the main checkout; harness claude, codex, opencode, agy, pi or command,
                          with optional model, profile, provider, effort and args
+
+The input must hold every finding the detector made (detect.js --json prints them all). Check
+failures the detector recorded are passed on in "detectorErrors".
 
 With no model configured it prints the findings ready to judge and exits 0, so the calling agent
 judges them itself. If the model fails, or its reply is not valid or leaves a finding unjudged,
@@ -44,7 +48,7 @@ const HINTS = {
   'dropped-rule': 'Real only if dropping the rule or reason was not intended by the rewrite.',
   'missing-companion': 'Real if the companion file describes or mirrors what changed.',
   'changelog-missing': 'Real if users of the project would notice the change.',
-  'doc-example-stale': 'Real unless the flag or command exists under a name the detector missed.',
+  'doc-example-stale': 'Real unless the line records history or the command still exists under that name.',
   'version-mismatch': 'Real if both files describe the same package or plugin.',
   'duplicate-code': 'Real if the two blocks do the same job and could share one helper; dismiss generated or intentionally mirrored copies.',
   complexity: 'Real if the function would read better split; dismiss a flat table, a dispatcher or generated code.',
@@ -103,10 +107,8 @@ function roleArgv(role, prompt) {
       return ['agy', '-p', prompt, ...opt('--model', role.model), ...opt('--effort', role.effort), ...extra];
     case 'pi':
       return ['pi', '-p', prompt, ...opt('--model', role.model), ...opt('--provider', role.provider), ...opt('--thinking', role.effort), ...extra];
-    case 'command': {
-      if (!Array.isArray(role.command) || !role.command.length) throw new Error('the command harness needs a "command" array');
-      return [...role.command.map((w) => argWithPrompt(String(w), prompt)), ...extra];
-    }
+    case 'command':
+      return [...withPrompt(role.command, prompt, 'the command harness\'s "command"'), ...extra];
     default:
       throw new Error(`unsupported harness "${role.harness}" for the small role`);
   }
@@ -114,78 +116,33 @@ function roleArgv(role, prompt) {
 
 const PROMPT = '{prompt}';
 
-// One element of a command array. The prompt must stay exactly one argument: a word that embeds
-// it in more text (sh -c "model {prompt}", python -c "...{prompt}...") hands repository text to
-// an interpreter, which re-parses its quotes and can run what is in them.
-function argWithPrompt(word, prompt) {
-  if (!word.includes(PROMPT)) return word;
-  const m = /^(-{1,2}[A-Za-z0-9][\w.-]*=)?\{prompt\}$/.exec(word);
-  if (!m) throw new Error(`the command harness takes {prompt} as a whole element or as --flag={prompt}, not inside ${JSON.stringify(word.slice(0, 60))}; for a shell, pass it as an argument: ["sh", "-c", "model \\"$1\\"", "sh", "{prompt}"]`);
-  return (m[1] || '') + prompt;
+// A command array with the prompt put in. The prompt is only ever a whole element, so no shell
+// or interpreter re-parses repository text; an array without one gets the prompt on stdin.
+function withPrompt(command, prompt, where) {
+  if (!Array.isArray(command) || !command.length || !command.every((w) => typeof w === 'string')) throw new Error(`${where} takes a non-empty JSON array of strings, such as ["codex", "exec", "{prompt}"]`);
+  return command.map((w) => {
+    if (w === PROMPT) return prompt;
+    if (w.includes(PROMPT)) throw new Error(`${where}: {prompt} must be a whole element, not part of ${JSON.stringify(w.slice(0, 60))}`);
+    return w;
+  });
 }
 
-// A shell command's {prompt} becomes an expansion of $DESLOP_PROMPT that is one word in its
-// quoting context: "${DESLOP_PROMPT}" bare, ${DESLOP_PROMPT} inside double quotes, and
-// '"${DESLOP_PROMPT}"' inside single quotes (close the quote, expand, reopen). Inside $(...),
-// ${...}, backticks, $'...' or a here-document the quoting rules differ between shells, so a
-// {prompt} there, or one escaped with a backslash, is refused rather than passed corrupted.
-const EXPAND = '${DESLOP_PROMPT}';
-function shellWithPrompt(cmd) {
-  const stack = []; // open quotes and substitutions: ' " ( $( ${ ` $'
-  let out = '';
-  let replaced = 0;
-  let heredoc = false;
-  const refuse = () => new Error(`{prompt} in --cmd or DESLOP_SMALL_CMD can stand bare or inside "..." or '...', not escaped or inside $(...), \${...}, backticks, $'...' or a here-document; leave it out to get the prompt on stdin`);
-  for (let i = 0; i < cmd.length;) {
-    const top = stack[stack.length - 1];
-    if (top !== "$'" && cmd.startsWith(PROMPT, i)) {
-      if (heredoc || stack.some((s) => !["'", '"', '('].includes(s))) throw refuse();
-      out += top === '"' ? EXPAND : top === "'" ? `'"${EXPAND}"'` : `"${EXPAND}"`;
-      replaced++;
-      i += PROMPT.length;
-      continue;
-    }
-    const c = cmd[i];
-    const two = cmd.slice(i, i + 2);
-    let take = 1;
-    if (top === "'") { if (c === "'") stack.pop(); }
-    else if (c === '\\') take = 2; // the escaped character is never the start of a {prompt}
-    else if (top === "$'") { if (c === "'") stack.pop(); }
-    else if (top === '"') {
-      if (c === '"') stack.pop();
-      else if (two === '$(' || two === '${') { stack.push(two); take = 2; }
-      else if (c === '`') stack.push('`');
-    } else if (top === '`' && c === '`') stack.pop();
-    else if (c === "'" || c === '"') stack.push(c);
-    else if (two === "$'" || two === '$(' || two === '${') { stack.push(two); take = 2; }
-    else if (c === '`') stack.push('`');
-    else if (c === '(') stack.push('(');
-    else if (c === ')' && (top === '(' || top === '$(')) stack.pop();
-    else if (c === '}' && top === '${') stack.pop();
-    else if (two === '<<') heredoc = true;
-    out += cmd.slice(i, i + take);
-    i += take;
-  }
-  if (replaced !== cmd.split(PROMPT).length - 1) throw refuse();
-  return out;
-}
-
-// How to run the model: {label, argv, stdin, env} or null when nothing is configured.
+// How to run the model: {label, argv, stdin, from} or null when nothing is configured.
 function resolveModel(o, prompt) {
-  const shell = o.cmd || process.env.DESLOP_SMALL_CMD;
-  if (shell) {
-    // The prompt reaches the shell through the environment, never spliced into the command text.
-    // Without {prompt} it goes to stdin only: an environment string has the same exec size limit
-    // as an argument, so setting it anyway would bound the stdin path too.
-    const uses = shell.includes(PROMPT);
-    return { label: shell, argv: ['sh', '-c', uses ? shellWithPrompt(shell) : shell], stdin: !uses, env: uses ? { DESLOP_PROMPT: prompt } : {}, from: o.cmd ? '--cmd' : 'DESLOP_SMALL_CMD' };
+  const raw = o.cmd || process.env.DESLOP_SMALL_CMD;
+  if (raw) {
+    const where = o.cmd ? '--cmd' : 'DESLOP_SMALL_CMD';
+    let command;
+    try { command = JSON.parse(raw); } catch { command = null; }
+    const argv = withPrompt(command, prompt, where);
+    return { label: command.join(' '), argv, stdin: !command.includes(PROMPT), from: where };
   }
   const g = gishraRole(o.repo);
   if (!g) return null;
   const argv = roleArgv(g.role, prompt);
-  const stdin = g.role.harness === 'command' && !g.role.command.some((w) => String(w).includes(PROMPT));
+  const stdin = g.role.harness === 'command' && !g.role.command.includes(PROMPT);
   const label = [g.role.harness, g.role.profile || g.role.model].filter(Boolean).join(':');
-  return { label, argv, stdin, env: {}, from: g.file };
+  return { label, argv, stdin, from: g.file };
 }
 
 // --- the prompt ---------------------------------------------------------------------------
@@ -257,8 +214,8 @@ const INSTRUCTIONS = `You are confirming findings from deslop, a detector for de
 Reply with one JSON object and nothing else:
 {"confirmed": [1], "dismissed": [{"id": 2, "why": "..."}], "fixes": [{"file": "a.md", "line": 3, "action": "replace", "old": "x", "new": "y", "reason": "stale-mention"}]}`;
 
-// Linux refuses to exec an argument or environment string over 128 KiB (MAX_ARG_STRLEN, counted
-// in bytes), and the prompt is one; every prompt, instructions included, stays well under that.
+// Linux refuses to exec an argument over 128 KiB (MAX_ARG_STRLEN, counted in bytes), and the
+// prompt is often one; every prompt, instructions included, stays well under that.
 const PROMPT_BYTES = 96 * 1024;
 const HEAD = `${INSTRUCTIONS}\n\nFindings:\n\n`;
 
@@ -370,7 +327,6 @@ function runModel(model, prompt, o) {
     cwd: o.repo,
     input: model.stdin ? prompt : '',
     encoding: 'utf8',
-    env: { ...process.env, ...model.env },
     maxBuffer: 64 * 1024 * 1024,
     timeout: o.timeout * 1000,
   });
@@ -387,9 +343,13 @@ function main(argv) {
   const raw = o.input ? fs.readFileSync(o.input, 'utf8') : fs.readFileSync(0, 'utf8');
   const report = JSON.parse(raw);
   if (!report || !Array.isArray(report.items)) throw new Error('input is not detector JSON (no "items" array); run detect.js --json');
+  // Findings left out of the input (detect.js --max) would never be judged, and a result
+  // without them could read as clean.
+  if (report.total > report.items.length) throw new Error(`the input holds ${report.items.length} of the detector's ${report.total} findings; run detect.js --json without --max so every finding is judged`);
   const items = report.items.map((it, i) => ({ ...it, id: i + 1 }));
   const result = { mode: o.mode, scope: report.scope || 'diff', base: report.base, findings: [], fixes: [], dismissed: [], unconfirmed: [], summary: { reported: items.length, confirmed: 0, dismissed: 0, fixable: 0 } };
-  if (report.total > items.length) result.summary.notShown = report.total - items.length;
+  // A check that failed found nothing, which is not the same as finding nothing.
+  if (Array.isArray(report.errors) && report.errors.length) result.detectorErrors = report.errors.map(String);
   if (!items.length) { console.log(JSON.stringify(result, null, 2)); return 0; }
   const parts = batches(items, o.repo);
   const model = resolveModel(o, parts[0].prompt);
@@ -399,6 +359,7 @@ function main(argv) {
   }
   if (!model) {
     console.log(`deslop-confirm: no small model configured (--cmd, DESLOP_SMALL_CMD or a gishra "small" role). Judge these ${items.length} findings yourself and build the DESLOP_RESULT block.\n`);
+    if (result.detectorErrors) console.log(`The detector also failed in part; put these in "detectorErrors":\n${result.detectorErrors.map((e) => `- ${e}`).join('\n')}\n`);
     console.log(parts.map((p) => p.prompt).join('\n'));
     return 0;
   }

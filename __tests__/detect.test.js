@@ -413,13 +413,27 @@ describe('doc sync', () => {
     expect(detect(refactor).some((i) => i.check === 'changelog-missing')).toBe(false);
   });
 
-  test('a docs example passes a flag our CLI does not define; other tools and defined flags pass', () => {
+  test('a flag no file spells is not reported: argparse abbreviations, delegated parsers and unknown CLIs all accept some', () => {
     const root = repo(
-      { 'package.json': '{"name": "tool", "version": "1.0.0", "bin": {"tool": "cli.js"}}\n', 'cli.js': "if (args.includes('--json')) print();\nconst maxCount = opts['max-count'];\n", 'README.md': '# tool\n' },
-      { 'README.md': '# tool\n\n```\ntool --json --max-count=3 --fast-mode\ngit push --force-with-lease\n```\n\nOr run `tool --dry-plan`.\n' },
+      {
+        'package.json': '{"name": "tool", "version": "1.0.0", "bin": {"tool": "cli.js"}}\n',
+        'cli.js': "if (args.includes('--json')) print();\n",
+        'scripts/cli.py': 'import argparse\n\nparser = argparse.ArgumentParser()\nparser.add_argument("--logging-directory")\nparser.parse_args()\n',
+        'scripts/wrap.py': 'from helper import main\n\nmain()\n',
+        'scripts/helper.py': 'import subprocess, sys\n\n\ndef main():\n    subprocess.run(["git", *sys.argv[1:]])\n',
+        'README.md': '# tool\n',
+      },
+      { 'README.md': '# tool\n\n```\npython scripts/cli.py --logging-dir /tmp\npython scripts/wrap.py --exec-path\ntool --fast-mode\npython scripts/cli.py --help\n```\n' },
     );
-    const stale = detect(root).filter((i) => i.check === 'doc-example-stale').map((i) => `${i.line}:${i.token}`);
-    expect(stale).toEqual(['4:--fast-mode', '8:--dry-plan']);
+    expect(detect(root).filter((i) => i.check === 'doc-example-stale')).toEqual([]);
+  });
+
+  test('a flag this change removed or renamed is still passed in a docs example', () => {
+    const base = { 'src/cli.js': "program.option('--fast-mode', 'f');\nprogram.option('--dry-plan', 'd');\n", 'README.md': '# tool\n\n```\ntool --fast-mode\ntool --dry-plan\n```\n' };
+    const root = repo(base, { 'src/cli.js': "program.option('--dry-run-plan', 'd');\n" });
+    const items = detect(root).filter((i) => i.file === 'README.md');
+    expect(items.map((i) => `${i.check}:${i.line}:${i.token}`).sort()).toEqual(['stale-mention:4:--fast-mode', 'stale-mention:5:--dry-plan']);
+    expect(items.find((i) => i.token === '--dry-plan').fix).toEqual({ fixType: 'replace-token', from: '--dry-plan', to: '--dry-run-plan' });
   });
 
   test('a slash command whose file this change deleted is still invoked in a doc', () => {
@@ -431,56 +445,57 @@ describe('doc sync', () => {
     expect(items.map((i) => `${i.file}:${i.line}`)).toEqual(['README.md:1']);
   });
 
+  test('a renamed slash command is invoked by its old name; the fix names the new one', () => {
+    const root = repo({ 'commands/old-scan.md': '# scan\n\nScans the tree.\n', 'README.md': 'Run `/old-scan` first.\n' }, { 'commands/old-scan.md': null, 'commands/tree-scan.md': '# scan\n\nScans the tree.\n' });
+    const items = detect(root).filter((i) => i.check === 'doc-example-stale');
+    expect(items.map((i) => [i.line, i.message, i.fix])).toEqual([[1, 'runs `/old-scan`, which this change renamed to `/tree-scan`', { fixType: 'replace-token', from: '/old-scan', to: '/tree-scan' }]]);
+  });
+
+  test('a package bin this change removed is still run in a doc; prose naming it and a bin another package keeps pass', () => {
+    const root = repo(
+      {
+        'package.json': '{"name": "kit", "version": "1.0.0", "bin": {"kit": "cli.js", "kit-sync": "sync.js", "kit-lint": "lint.js"}}\n',
+        'other/package.json': '{"name": "other", "version": "1.0.0", "bin": {"kit-lint": "lint.js"}}\n',
+        'README.md': '# kit\n\n```\nkit-sync --all\nkit --help\nkit-lint .\n```\n\nOr `npx kit-sync`. The kit-sync tool was handy.\n',
+      },
+      { 'package.json': '{"name": "kit", "version": "1.0.0", "bin": {"kit": "cli.js"}}\n' },
+    );
+    const items = detect(root).filter((i) => i.check === 'doc-example-stale');
+    expect(items.map((i) => `${i.line}:${i.token}`)).toEqual(['4:kit-sync', '9:kit-sync']);
+  });
+
   test('a version moved in one manifest and not in the plugin manifest of the same package', () => {
     const root = repo(
-      { 'package.json': '{\n  "name": "@scope/kit",\n  "version": "1.0.0"\n}\n', '.claude-plugin/plugin.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n', 'other/package.json': '{\n  "name": "other",\n  "version": "1.0.0"\n}\n' },
-      { 'package.json': '{\n  "name": "@scope/kit",\n  "version": "1.1.0"\n}\n' },
+      { 'package.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n', '.claude-plugin/plugin.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n', 'other/package.json': '{\n  "name": "other",\n  "version": "1.0.0"\n}\n' },
+      { 'package.json': '{\n  "name": "kit",\n  "version": "1.1.0"\n}\n' },
     );
     const items = detect(root).filter((i) => i.check === 'version-mismatch');
     expect(items.map((i) => `${i.file}:${i.line}:${i.severity}`)).toEqual(['.claude-plugin/plugin.json:3:high']);
     expect(items[0].fix).toEqual({ fixType: 'replace-token', from: '1.0.0', to: '1.1.0' });
   });
 
-  test('packages under different npm scopes are different packages, and a plugin manifest is a mirror only when the bare name is unambiguous', () => {
+  test('a package is its exact name: other scopes, the unscoped name and an underscore spelling are other packages', () => {
     const pkg = (name, version) => `{\n  "name": "${name}",\n  "version": "${version}"\n}\n`;
-    const two = repo(
-      { 'a/package.json': pkg('@one/kit', '1.0.0'), 'b/package.json': pkg('@two/kit', '1.0.0'), '.claude-plugin/plugin.json': pkg('kit', '1.0.0') },
-      { 'a/package.json': pkg('@one/kit', '1.1.0') },
-    );
-    expect(detect(two).filter((i) => i.check === 'version-mismatch')).toEqual([]);
-    const one = repo(
-      { 'a/package.json': pkg('@one/kit', '1.0.0'), 'c/package.json': pkg('@one/other', '1.0.0'), '.claude-plugin/plugin.json': pkg('kit', '1.0.0') },
-      { 'a/package.json': pkg('@one/kit', '1.1.0') },
-    );
-    expect(detect(one).filter((i) => i.check === 'version-mismatch').map((i) => i.file)).toEqual(['.claude-plugin/plugin.json']);
-  });
-
-  test('flags a parser library provides are not stale, and a flag a command hands on is REVIEW, not HIGH', () => {
     const root = repo(
-      {
-        'scripts/cli.py': 'import argparse\n\nparser = argparse.ArgumentParser()\nparser.add_argument("--count")\nargs = parser.parse_args()\n',
-        'scripts/wrap.sh': '#!/bin/sh\nexec git -C "$HOME" "$@"\n',
-        'package.json': '{"name": "tool", "version": "1.0.0", "bin": {"tool": "bin/tool.js"}}\n',
-        'bin/tool.js': "const { spawnSync } = require('child_process');\nspawnSync('git', process.argv.slice(2), { stdio: 'inherit' });\n",
-        'README.md': '# tool\n',
-      },
-      { 'README.md': '# tool\n\n```\npython scripts/cli.py --help\npython scripts/cli.py --dry-plan\nsh scripts/wrap.sh --force-with-lease\ntool --version\ntool --amend-all\n```\n' },
+      { 'a/package.json': pkg('@one/kit', '1.0.0'), 'b/package.json': pkg('@two/kit', '1.0.0'), '.claude-plugin/plugin.json': pkg('kit', '1.0.0'), 'c/package.json': pkg('foo-bar', '1.0.0'), 'd/package.json': pkg('foo_bar', '1.0.0'), 'README.md': '# kits\n' },
+      { 'a/package.json': pkg('@one/kit', '1.1.0'), 'c/package.json': pkg('foo-bar', '1.1.0'), 'README.md': '# kits\n\nnpm i foo_bar@1.0.0\nnpm i kit@1.0.0\n' },
     );
-    const stale = detect(root).filter((i) => i.check === 'doc-example-stale').map((i) => `${i.line}:${i.token}:${i.severity}`);
-    expect(stale).toEqual(['5:--dry-plan:high', '6:--force-with-lease:review', '8:--amend-all:review']);
+    expect(detect(root).filter((i) => i.check === 'version-mismatch')).toEqual([]);
   });
 
-  test('versioned and archived docs and manifests keep old flags and versions', () => {
-    const pkg = (version) => `{\n  "name": "kit",\n  "version": "${version}",\n  "bin": {"kit": "cli.js"}\n}\n`;
-    const lines = 'Run `kit --old-mode`.\n\nnpm i kit@1.0.0\n';
+  test('versioned and archived docs and manifests keep old commands and versions', () => {
+    const pkg = (version) => `{\n  "name": "kit",\n  "version": "${version}"\n}\n`;
+    const lines = 'Run `/old-scan` first.\n\nnpm i kit@1.0.0\n';
     const docs = repo(
-      { 'package.json': pkg('1.1.0'), 'cli.js': "if (args.includes('--new-mode')) run();\n", 'CHANGELOG.md': changelog },
-      { 'versioned_docs/v1.0/usage.md': lines, 'docs/archive/2024/usage.md': lines, 'versioned_docs/v1.0/commands/old.md': '# old\n', 'docs/usage.md': lines },
+      { 'package.json': pkg('1.1.0'), 'commands/old-scan.md': '# old\n', 'versioned_docs/v1.0/usage.md': lines, 'docs/archive/2024/usage.md': lines },
+      { 'commands/old-scan.md': null, 'versioned_docs/v1.1/usage.md': lines, 'docs/usage.md': lines },
     );
-    const items = detect(docs).filter((i) => ['doc-example-stale', 'version-mismatch', 'changelog-missing'].includes(i.check));
+    const items = detect(docs).filter((i) => ['doc-example-stale', 'version-mismatch'].includes(i.check));
     expect(items.map((i) => `${i.check}@${i.file}:${i.line}`).sort()).toEqual(['doc-example-stale@docs/usage.md:1', 'version-mismatch@docs/usage.md:3']);
+    const log = repo({ 'CHANGELOG.md': changelog, 'src/a.js': 'x\n' }, { 'versioned_docs/v1.0/commands/old.md': '# old\n' });
+    expect(detect(log).filter((i) => i.check === 'changelog-missing')).toEqual([]);
     const manifests = repo(
-      { 'package.json': pkg('1.0.0'), 'archive/v1/package.json': pkg('1.0.0'), '.claude-plugin/plugin.json': '{\n  "name": "kit",\n  "version": "1.0.0"\n}\n' },
+      { 'package.json': pkg('1.0.0'), 'archive/v1/package.json': pkg('1.0.0'), '.claude-plugin/plugin.json': pkg('1.0.0') },
       { 'package.json': pkg('1.1.0') },
     );
     expect(detect(manifests).filter((i) => i.check === 'version-mismatch').map((i) => i.file)).toEqual(['.claude-plugin/plugin.json']);
@@ -617,6 +632,67 @@ describe('agent config', () => {
     const without = run(basePath);
     expect(without.items.filter((i) => i.check === 'agent-config')).toEqual([]);
     expect(without.errors).toEqual([]);
+  });
+});
+
+// The detector's JSON piped into the confirm step, as the skill runs them.
+describe('detector to confirm', () => {
+  const CONFIRM = path.join(__dirname, '..', 'scripts', 'confirm.js');
+  // A stand-in model that dismisses every finding it was shown and counts them.
+  function dismissAll(dir) {
+    const p = path.join(dir, 'dismiss.js');
+    fs.writeFileSync(p, `const prompt = require('fs').readFileSync(0, 'utf8');
+const ids = [...prompt.matchAll(/^\\[(\\d+)\\] /gm)].map((m) => Number(m[1]));
+process.stdout.write(JSON.stringify({ confirmed: [], dismissed: ids.map((id) => ({ id, why: 'example' })), fixes: [] }));
+`);
+    return JSON.stringify(['node', p]);
+  }
+  function pipe(root, detectArgs, env = {}) {
+    const d = spawnSync('node', [DETECT, root, '--base=main', '--json', ...detectArgs], { encoding: 'utf8', env: { ...process.env, ...env } });
+    expect(d.status).toBe(0);
+    const c = spawnSync('node', [CONFIRM, `--repo=${root}`, `--cmd=${dismissAll(root + '-tools')}`], { input: d.stdout, encoding: 'utf8' });
+    return { detected: JSON.parse(d.stdout), confirm: c };
+  }
+
+  test('every finding past the text cap of 40 is judged, and input cut short with --max is refused', () => {
+    const docs = {};
+    for (let i = 0; i < 15; i++) docs[`docs/p${i}.md`] = [0, 1, 2].map((k) => `See src/gone${i}x${k}.js for part ${k}.`).join('\n') + '\n';
+    const root = repo({ 'src/a.js': 'x\n', 'docs/p0.md': '# d\n' }, docs);
+    fs.mkdirSync(root + '-tools');
+    roots.push(root + '-tools');
+    const { detected, confirm } = pipe(root, []);
+    expect(detected.total).toBe(45);
+    expect(detected.items.length).toBe(45);
+    const out = JSON.parse(confirm.stdout);
+    expect(out.summary).toMatchObject({ reported: 45, confirmed: 0, dismissed: 45 });
+    const cut = pipe(root, ['--max=40']).confirm;
+    expect(cut.status).toBe(1);
+    expect(cut.stderr).toMatch(/holds 40 of the detector's 45 findings/);
+  });
+
+  test('a check that failed reaches the result, with and without findings', () => {
+    // agnix that crashes: the agent-config check cannot run, which must not read as clean.
+    const tools = fs.mkdtempSync(path.join(TMP, 'deslop-tools-'));
+    roots.push(tools);
+    const bin = path.join(tools, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'agnix'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "agnix 0.0.0"; exit 0; fi\necho "panicked at src/main.rs" >&2\nexit 101\n', { mode: 0o755 });
+    const PATH = `${bin}${path.delimiter}${process.env.PATH}`;
+    const quiet = repo({ 'AGENTS.md': '# Rules\n' }, { 'AGENTS.md': '# Rules\n\n- one\n' });
+    fs.mkdirSync(quiet + '-tools');
+    roots.push(quiet + '-tools');
+    let r = pipe(quiet, [], { PATH });
+    expect(r.detected.errors).toEqual([expect.stringMatching(/^agentconfig: agnix gave no JSON report \(exit 101\): panicked/)]);
+    let out = JSON.parse(r.confirm.stdout);
+    expect(out.findings).toEqual([]);
+    expect(out.detectorErrors).toEqual(r.detected.errors);
+    const noisy = repo({ 'AGENTS.md': '# Rules\n', 'src/a.js': 'x\n' }, { 'AGENTS.md': '# Rules\n\n- one\n', 'docs/a.md': 'See src/gone.js.\n' });
+    fs.mkdirSync(noisy + '-tools');
+    roots.push(noisy + '-tools');
+    r = pipe(noisy, [], { PATH });
+    out = JSON.parse(r.confirm.stdout);
+    expect(out.summary.dismissed).toBe(1);
+    expect(out.detectorErrors).toEqual(r.detected.errors);
   });
 });
 

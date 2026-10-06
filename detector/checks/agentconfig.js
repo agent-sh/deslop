@@ -23,8 +23,12 @@ module.exports = {
     // agnix reads files from disk, so it can only check a scan of the checked-out tree.
     if (!files.length || (ctx.head && ctx.head !== 'HEAD') || !haveAgnix()) return [];
     const r = spawnSync('agnix', ['--format', 'json', ...files.map((f) => f.path)], { cwd: ctx.root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 120000 });
+    // agnix exits 1 when it finds errors, so the status says nothing; output that is not its JSON
+    // means it did not run, and an empty result then would read as a clean change.
     let out;
-    try { out = JSON.parse(r.stdout || ''); } catch { return []; }
+    try { out = JSON.parse(r.stdout || ''); } catch {
+      throw new Error(`agnix gave no JSON report (${r.error ? r.error.message : `exit ${r.status}`}): ${(r.stderr || r.stdout || '').trim().slice(0, 200)}`);
+    }
     const byPath = new Map(files.map((f) => [f.path, f]));
     const items = [];
     for (const d of out.diagnostics || []) {
