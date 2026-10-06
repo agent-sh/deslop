@@ -1,7 +1,7 @@
 ---
 name: deslop
 description: "Use when the user asks to clean AI slop from code: 'deslop', 'clean up slop', 'remove debug statements', 'find ghost code', 'repo hygiene'. Detects slop with regex, AST and optional repo-intel signals, then reports or applies fixes."
-version: 5.4.0
+version: 5.5.0
 argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
 ---
 
