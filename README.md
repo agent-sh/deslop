@@ -1,16 +1,19 @@
 # deslop
 
-Detect and remove AI-generated slop from codebases with certainty-based findings and safe auto-fixes.
+Checks a change for what current coding models leave behind, and fixes what it confirms.
 
 ## Why
 
-AI coding tools leave behind debug statements, placeholder text, empty catch blocks, over-commented code, and dead abstractions. Manual cleanup is tedious and error-prone. deslop runs a 3-phase detection pipeline that categorizes every finding by certainty level - HIGH findings get auto-fixed, MEDIUM findings get flagged for review, and LOW findings are reported without action. Behavior is preserved. Diffs are minimal.
+The slop changed. Current models do not leave debug prints, TODO stubs or empty catch blocks; in a study of 2,912 defects that reviewers found in agent-written pull requests, 6 were that kind. What they leave is text that was true before the change:
 
-**Use cases:**
+- a doc, comment or setting that still names the script, flag or env var the change deleted
+- a count or version updated in one file and not in its copies
+- a link to a heading that was renamed, a cited path that does not exist
+- a code comment that records the review round instead of the reason
+- a test that cannot fail, a PR body that says "docs-only" over a code change
+- a rewritten instruction file that lost a rule or its reason
 
-- Pre-PR hygiene - scan changed files before opening a pull request
-- Periodic repo maintenance - sweep the full codebase for accumulated slop
-- CI gate - fail on HIGH-certainty slop in changed files
+deslop 1.x looked for the old kind. Measured on 40 recent pull requests, 0.5% of its findings were real and it caught none of the 106 defects reviewers found, while a run cost 15 to 25K tokens. deslop 2 is a git-based detector: it costs nothing when the change is clean, and the agent reads only the lines it flags.
 
 ## Installation
 
@@ -18,109 +21,59 @@ AI coding tools leave behind debug statements, placeholder text, empty catch blo
 agentsys install deslop
 ```
 
-## Quick Start
-
-```bash
-# Report slop findings (no changes made)
-/deslop
-
-# Auto-fix HIGH certainty findings
-/deslop apply
-
-# Scan only changed files in current branch
-/deslop report --scope=diff
-
-# Fix up to 10 findings in a specific directory
-/deslop apply src/ 10
-```
-
-## How It Works
-
-deslop uses a 3-phase detection pipeline with increasing analysis depth:
-
-**Phase 1 - Regex patterns (HIGH certainty).** Fast pattern matching for `console.log`, `print()`, `dbg!()`, TODO/FIXME markers, empty catch blocks, hardcoded secrets, trailing whitespace, and mixed indentation. These are safe to auto-fix.
-
-**Phase 2 - Multi-pass analyzers (MEDIUM certainty).** Structural analysis for doc-to-code ratio problems, verbose over-commenting, over-engineering, buzzword inflation, dead code after return/throw, and stub functions. These need human review.
-
-**Phase 3 - CLI tools (LOW certainty, optional).** Runs external tools when available - jscpd for duplication, madge for circular dependencies, eslint/pylint/clippy/golangci-lint for language-specific issues. Findings are flagged but not auto-fixed.
-
-**Thoroughness levels** control which phases run:
-
-| Level | Phases | Speed |
-|-------|--------|-------|
-| `quick` | Phase 1 only | Seconds |
-| `normal` (default) | Phase 1 + 2 | Seconds |
-| `deep` | Phase 1 + 2 + 3 | Depends on CLI tools |
-
-**Repo-intel integration** - when repo-intel data is available, deslop takes the analyzer's pre-located fixes (`slop-fixes`), scans the files it ranks as likely slop first (`slop-targets`), and lists findings in files with no test coverage first (`test-gaps`). Those findings are not auto-fixed on that basis, because nothing would catch a wrong fix there.
-
-## Certainty Levels
-
-| Level | Meaning | Action |
-|-------|---------|--------|
-| HIGH | Definitely slop - safe to remove | Auto-fixed in apply mode |
-| MEDIUM | Likely slop - needs context | Flagged for review |
-| LOW | Possible slop - context-dependent | Reported only |
-
 ## Usage
 
-### Report Mode (default)
-
 ```bash
-/deslop
-/deslop report --scope=diff
-/deslop report --thoroughness=deep
+/deslop                      # report on the current branch against its merge base
+/deslop apply                # apply the fixes the agent confirmed, run tests, commit
+/deslop --base=release/2.x   # another base
+/deslop --scope=docs/        # every tracked file under docs/, no diff
 ```
 
-Outputs a prioritized table of findings with certainty levels and suggested fixes. No files are modified.
-
-### Apply Mode
+The detector runs on its own too:
 
 ```bash
-/deslop apply
-/deslop apply --scope=diff
-/deslop apply src/ 10
+node scripts/detect.js .                    # text report
+node scripts/detect.js . --json --worktree  # include uncommitted changes
+gh pr view --json body -q .body | node scripts/detect.js . --pr-body=-
 ```
 
-Auto-fixes the HIGH certainty findings, then runs the project's test suite. Files that already have uncommitted changes are skipped. If tests fail, only the files deslop edited are restored (`git restore -- <files>`) and the failing fix is reported; your other uncommitted work is left alone.
+## What it checks
 
-### Scope Options
+| Check | Finds |
+|---|---|
+| `stale-mention` | A file, flag, env var, function or value the change removed or replaced, still named elsewhere |
+| `missing-path`, `broken-anchor` | Cited paths and Markdown heading links that resolve to nothing |
+| `scope-claim` | PR text or commits claiming docs-only or test-only over a code change |
+| `review-provenance` | Review history in code comments |
+| `test-cannot-fail`, `test-swallows-failure` | Tests with no assertion, scripts with no failing exit, swallowed errors |
+| `displaced-doc-comment`, `duplicate-line` | Code inserted between a doc comment and its item; lines written twice |
+| `no-caller`, `unread-setting` | Added code nothing calls, settings nothing reads |
+| `dropped-rule` | Rules and reasons a doc or prompt rewrite removed |
+| `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON |
+| `lint` | shellcheck, ruff and actionlint on added lines, when installed |
+| `em-dash` | House style; off with `.deslop.json` |
 
-- `all` (default) - scan entire codebase
-- `diff` - only files changed in current branch
-- `<path>` - specific directory or file
+Logic errors, edge cases and races need a reviewer, so deslop does not guess at them.
 
-### Thoroughness Options
+## Configuration
 
-```bash
-/deslop --thoroughness=quick    # Phase 1 only
-/deslop --thoroughness=normal   # Phase 1 + 2 (default)
-/deslop --thoroughness=deep     # All phases
+`.deslop.json` at the repository root:
+
+```json
+{ "ignore": ["vendor/**", "fixtures/**"], "disable": ["em-dash"], "style": { "emDash": false } }
 ```
-
-## Supported Languages
-
-Two layers, two coverage stories:
-
-| Layer | Languages | Detection |
-|-------|-----------|-----------|
-| **Analyzer slop queries** (when `repo-intel.json` present) | JavaScript/TypeScript, Python, Rust, Go, Java | tree-sitter AST: empty error handling per language idiom, tautological assertions across major test frameworks, orphan exports, cliché-name clusters, wrapper towers, single-impl traits, high-bug communities |
-| **Regex pipeline** (always) | JavaScript/TypeScript, Python, Rust, Go, Java | universal patterns (debug statements, trailing whitespace, mixed indentation, placeholder text), language-specific patterns where defined |
-
-Kotlin, C/C++, and Shell files are walked but no language-specific detectors are bundled today; only universal regex patterns apply. Tracked in [#27](https://github.com/agent-sh/agent-analyzer/issues/27).
 
 ## Requirements
 
-- Git (required for rollback safety)
-- Node.js
-- [agentsys](https://github.com/agent-sh/agentsys) runtime
-- For deep mode: jscpd, madge, eslint, pylint, clippy, or golangci-lint (optional, used when available)
+- Git and Node.js
+- [ripgrep](https://github.com/BurntSushi/ripgrep) recommended: on large repositories it is the difference between seconds and minutes
+- shellcheck, ruff and actionlint are used when installed
 
-## Related Plugins
+## Related plugins
 
-- [next-task](https://github.com/agent-sh/next-task) - optional; invokes deslop in its Phase 8 pre-review gates
-- [enhance](https://github.com/agent-sh/enhance) - broader code quality analysis
-- [audit-project](https://github.com/agent-sh/audit-project) - multi-agent code review
+- [next-task](https://github.com/agent-sh/next-task) runs deslop before review
+- [audit-project](https://github.com/agent-sh/audit-project) for multi-agent review
 
 ## Host authorization for command execution
 

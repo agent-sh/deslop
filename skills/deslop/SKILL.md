@@ -1,86 +1,88 @@
 ---
 name: deslop
-description: "Use when the user asks to clean AI slop from code: 'deslop', 'clean up slop', 'remove debug statements', 'find ghost code', 'repo hygiene'. Detects slop with regex, AST and optional repo-intel signals, then reports or applies fixes."
+description: "Use when the user asks to deslop or clean up a change: 'deslop', 'clean up slop', 'check my diff for leftovers'. Runs a git-based detector for what current models leave behind, verifies each finding, and returns confirmed findings and safe fixes."
 version: 5.5.0
-argument-hint: "[report|apply] [--scope=all|diff|path] [--thoroughness=quick|normal|deep]"
+argument-hint: "[report|apply] [--scope=diff|repo|PATH] [--base=REF]"
 ---
 
 # deslop
 
-Find AI slop in a codebase (debug output, placeholders, empty catches, stub functions, dead code, tracked artifacts) and return findings ranked by certainty, with a list of fixes that are safe to apply without review. This skill only reads; the caller applies fixes.
+Check a change for the defects current coding models leave that no compiler or test catches, confirm each one by reading it, and return the confirmed ones with fixes. This skill only reads; the caller applies fixes.
 
 Arguments: `$ARGUMENTS`
 
-- **mode**: `report` (default) or `apply`. The mode is passed through to the result; it does not change what you scan.
-- **--scope**: `all` (default), `diff` (files changed on this branch), or a path.
-- **--thoroughness**: `quick` (regex only), `normal` (default, adds multi-pass analyzers), `deep` (adds jscpd, madge and similar CLI tools when installed).
+- **mode**: `report` (default) or `apply`. Passed through to the result; it does not change the scan.
+- **--scope**: `diff` (default: the branch against its merge base), `repo` (every tracked file), or a path (repo scope narrowed to it).
+- **--base**: base ref for diff scope. Default: origin's default branch.
 
-## Detection
+## What it finds
 
-The detector is `scripts/detect.js` at the plugin root, two directories up from this skill. Resolve it to an absolute path and run it from the repository root. It prints JSON by default (`findings`, `summary`); `--compact` prints a short markdown table without the `autoFix` field, so use the JSON when building fixes. Add `--quick` or `--deep` for those thoroughness levels.
+Models no longer leave debug prints and TODO stubs. They leave text that was true before the change: a doc still naming a script the change deleted, a count updated in one file and not the next, a link to a heading that was renamed, a comment that records the review round instead of the reason. The detector looks for those with git, so it costs no tokens when the change is clean.
+
+| Check | What it means | Read before confirming |
+|---|---|---|
+| `stale-mention` | A file, flag, env var, function or value this change removed or replaced is still named elsewhere. | Is the line describing the current state? A dated record or a "was removed" note is fine. |
+| `missing-path` | An added line cites a repo path that does not exist. HIGH when this change deleted it. | Is it an example, another repo's path, or a file a sibling PR adds? |
+| `broken-anchor` | A Markdown link points at a heading that no longer exists. | Check the target's headings. |
+| `scope-claim` | The PR text or a commit says docs-only or test-only but the diff changes code. | Comment-only code edits are fine. |
+| `review-provenance` | A code comment records review history ("revuto round 2"). | Rewrite it to say why the code is this way, or delete it. |
+| `test-cannot-fail` | A new test has no assertion, or a test script has no failing exit. | A helper the test calls may assert. |
+| `test-swallows-failure` | Test code discards an error (`|| true`, `2>/dev/null`). | Is the failure checked another way? |
+| `displaced-doc-comment` | New code was inserted between a doc comment and the item it documented. | Move the comment back above its item. |
+| `duplicate-line` | A comment or prose line written twice. | |
+| `no-caller`, `unread-setting` | Something added that nothing calls or reads. | Entry points, framework hooks and public API are wired from outside. |
+| `dropped-rule` | A doc or prompt rewrite removed a rule or reason whose words appear nowhere in the new text. | Was dropping it intended? Current models shorten well but lose exceptions. |
+| `merge-residue`, `secret`, `local-path`, `broken-file` | Conflict markers, credentials, machine-local paths, unparseable JSON. | |
+| `lint` | shellcheck, ruff or actionlint, on added lines, when installed. | |
+| `em-dash` | House style. Turn it off with `{"style": {"emDash": false}}` in `.deslop.json`. | |
+
+Logic errors, missed edge cases, races and wrong conditions need a reviewer; this skill does not look for them.
+
+## Run
+
+The detector is `scripts/detect.js`, two directories up from this skill. Resolve it to an absolute path and run it from the repository root:
 
 ```bash
-node <plugin>/scripts/detect.js .                                   # scope all
-node <plugin>/scripts/detect.js . src/api.js src/auth.js            # scope path: the files under it
-git diff --name-only --diff-filter=d "origin/$BASE"...HEAD \
-  | node <plugin>/scripts/detect.js . --files-from -                # scope diff
+node <plugin>/scripts/detect.js .                         # diff scope against origin's default branch
+node <plugin>/scripts/detect.js . --base=main --worktree  # include uncommitted changes
+node <plugin>/scripts/detect.js . --scope=repo -- docs/   # every tracked file under docs/
+gh pr view --json body -q .body | node <plugin>/scripts/detect.js . --pr-body=-
 ```
 
-For diff scope, `BASE` is the default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` with `origin/` stripped, or `main`. Files after the repo path (or from `--files-from`) are exactly what gets scanned, relative to the repo root. Without them the detector scans at most 200 source files and skips tests, or only the repo-intel slop targets when a map exists, so a whole-repo run is a sample: say so in the result when `metadata.filesAnalyzed` is 200 or targeting was on. For a path scope, list its files (`git ls-files <path>`) and pass them, rather than passing the path as the repo root.
+Pass the PR body when there is one: `scope-claim` and `em-dash` read it along with the commit messages. Output is a short text list, HIGH first; `--json` gives the same as JSON. `ripgrep` makes it fast on large repos; without it the detector falls back to `git grep`. Exit status 1 means the scan failed, not that it found something.
 
-Finding paths are relative to the repo root. Exit code 2 means critical findings exist, not that the run failed. On a large repo the JSON is long: read `summary` first and filter `findings` by certainty with `node -e` or `jq` rather than reading all of it.
+## Confirm
 
-When the repo has repo-intel data, the detector folds in the analyzer's pre-located fixes. [references/repo-intel.md](references/repo-intel.md) covers what that adds and the one query you run yourself (files without test coupling).
+The detector reports candidates. Read each cited line (and the changed line it refers to) and decide:
 
-Pattern names, certainty rules and fix strategies per language are in [../../references/slop-categories.md](../../references/slop-categories.md).
+- **real**: it is wrong after this change. Put it in `findings`, and in `fixes` when the edit is mechanical and you know the exact new text.
+- **dismissed**: it is right as written (an example, a historical record, another repo's path). Leave it out of `findings` and count it in `summary.dismissed`.
 
-## Judgment
+Do not go looking for other problems while confirming; that is the review's job and it costs tokens here. A HIGH finding is almost always real; a REVIEW finding is real often enough to read.
 
-The detector is a pattern matcher. Before a finding goes into `fixes`, read the line and confirm it is slop in this codebase:
-
-- `console.log`, `print` and `fmt.Println` in a CLI entry point or a logger are the program's output, not debugging. Drop those findings.
-- An empty catch with a comment explaining why is deliberate. Keep it out of `fixes`.
-- A finding in a test fixture, a generated file, or vendored code is not the repo's slop. Build output, `vendor/`, `node_modules/`, minified and generated files, and lockfiles are skipped by the detector; skip anything else of that kind you see.
-- In files with no test coupling, a wrong fix goes unnoticed. Rank their findings first in the report, and leave them out of `fixes` unless certainty is HIGH on its own.
-
-Only HIGH certainty findings with a real fix strategy become fixes. MEDIUM and LOW stay in `findings` for a human.
-
-`autoFix: "remove"` means the matched text is slop, not always the whole line. Pick the fix that removes exactly that:
-
-- The whole line is slop (a debug print, an unused debug import): `remove-line`.
-- Only part of the line is (trailing whitespace, a trailing `// see #42` comment after live code): `replace` with the corrected line. Deleting it would delete the code in front.
-- The finding spans lines (`commented_code` reports its range in `details.startLine` and `details.endLine`): `remove-line` with `endLine` set from `details.endLine`.
+A fix belongs in `fixes` only when you have read the line. `stale-mention` findings carry the replacement token when the change renamed something; confirm the new name is right for that line before using it.
 
 ## Output
 
-Return this block last. `/deslop` and `/next-task` parse the JSON between the markers and hand `fixes` to whatever applies them.
+Return this block last. `/deslop` and `/next-task` parse it; `fixes` use `next-task:simple-fixer`'s actions.
 
 ```
 === DESLOP_RESULT ===
 {
   "mode": "report",
-  "scope": "all",
-  "filesScanned": 120,
+  "scope": "diff",
+  "base": "origin/main",
   "findings": [
-    { "file": "src/api.js", "line": 42, "pattern": "console_debugging", "message": "console.log found",
-      "certainty": "HIGH", "severity": "medium", "autoFix": "remove", "untested": false }
+    { "file": "docs/setup.md", "line": 12, "check": "stale-mention",
+      "message": "names scripts/old-install.sh, which this change deleted" }
   ],
   "fixes": [
-    { "file": "src/api.js", "line": 42, "fixType": "remove-line", "pattern": "console_debugging" }
+    { "file": "docs/setup.md", "line": 12, "action": "replace",
+      "old": "scripts/old-install.sh", "new": "scripts/install.sh", "reason": "stale-mention" }
   ],
-  "summary": { "high": 1, "medium": 0, "low": 0, "autoFixable": 1 }
+  "summary": { "reported": 3, "confirmed": 1, "dismissed": 2, "fixable": 1 }
 }
 === END_RESULT ===
 ```
 
-Paths are relative to the repository root. `fixType` is one of:
-
-| fixType | From | Meaning |
-|---------|------|---------|
-| `remove-line` | detector `autoFix: "remove"` when the whole line or range is slop, analyzer `delete-lines` | Delete `line`, or `line` through `endLine`. |
-| `add-comment` | detector `autoFix: "add_logging"` | Empty catch: log the error if the file has a logger, else add a comment saying it is ignored on purpose, in the file's comment syntax. |
-| `replace` | detector `autoFix: "replace"`, `"remove"` on part of a line, analyzer `replace-lines` | Replace `line` (through `endLine` if set) with `replacement`. |
-| `remove-block` | multi-line constructs | Delete the whole block starting at `line`. |
-| `delete-file` | analyzer `delete-file` | Remove the tracked file (artifacts such as `.DS_Store`). |
-
-If git is missing, skip git-based checks and say so. If the scope path does not exist, return the block with empty arrays and an `"error"` field. A file that fails to parse is skipped and the scan continues.
+`action` is `remove-line`, `replace` (`old` to `new` on that line), `insert-after` or `insert-before` (`new`). Paths are relative to the repository root. On failure return the block with empty arrays and an `"error"` field.
