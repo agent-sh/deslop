@@ -818,6 +818,14 @@ process.stdout.write(JSON.stringify({ confirmed: [], dismissed: ids.map((id) => 
     expect(JSON.parse(r.confirm.stdout).detectorErrors).toEqual(r.detected.errors);
   });
 
+  test('a program that exits before reading its input fails with its exit status, not a broken pipe', () => {
+    // 4 MB is far past any pipe buffer, so the write always hits the closed pipe.
+    const { run } = require('../detector/proc');
+    const input = 'x'.repeat(4 * 1024 * 1024);
+    expect(() => run(process.execPath, ['-e', "process.stderr.write('fatal: early'); process.exit(2)"], { name: 'tool', input }))
+      .toThrow('tool failed (exit 2): fatal: early');
+  });
+
   test('a check that failed reaches the result, with and without findings', () => {
     // agnix that crashes: the agent-config check cannot run, which must not read as clean.
     const tools = fs.mkdtempSync(path.join(TMP, 'deslop-tools-'));

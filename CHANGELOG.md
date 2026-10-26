@@ -10,6 +10,7 @@
 ### Fixed
 - The detector excludes symlinked paths before every check, including agnix, and lists them under `skipped`. Neither internal nor external link targets are read; revision blobs, worktree files, parent directories and `.deslop.json` are covered. Confirmation preserves skipped-check notices and detector errors in fallback, dry-run and configuration-error output.
 - Confirmation reads Tower Crane `ladder.small` and inherits its default `harness`. A configured but unusable rung fails explicitly. Legacy `roles` files are refused.
+- A program that exits before reading all its input (a failing `git cat-file --batch-check`) is reported with its exit status, not as a broken pipe it could not run.
 
 ### Changed
 - `deslop-agent` no longer pins Sonnet; it inherits the session model and judges findings only when no small model is configured.
@@ -22,6 +23,8 @@
 
 ### Removed
 - `--thoroughness`, the regex pattern catalog (`references/slop-categories.md`), the repo-intel integration (`lib/repo-intel-signals.js`, `skills/deslop/references/repo-intel.md`) and the jscpd, madge and escomplex runs.
+- `lib/sources/` (next-task's task-source questions) and `releaseTask` in `lib/state/workflow-state.js`: nothing in deslop called them.
+- The retired repo-intel plugin's own code in `lib/`: the embed submodule, the summarizer and weighter helpers (`lib/repo-intel/enrich.js`), `applyDescriptors` and `applySummary`, and `lib/binary/shared-helpers.js`, which only the embed binary used. Nothing in deslop called them.
 
 ## [1.3.0] - 2026-10-06
 

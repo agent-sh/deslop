@@ -15,7 +15,9 @@ function run(bin, args, { name = bin, cwd, input, ok = [0], timeout, encoding = 
   let why = null;
   if (r.error && r.error.code === 'ETIMEDOUT') why = `timed out after ${timeout / 1000}s`;
   else if (r.error && r.error.code === 'ENOBUFS') why = `printed over ${maxBuffer} bytes`;
-  else if (r.error) why = `could not run: ${r.error.message}`;
+  // EPIPE with a status: the program ran and exited before reading all its input, so the status
+  // says why.
+  else if (r.error && !(r.error.code === 'EPIPE' && r.status !== null)) why = `could not run: ${r.error.message}`;
   else if (r.signal) why = `killed by ${r.signal}`;
   else if (!ok.includes(r.status)) why = `exit ${r.status}`;
   if (why) {
