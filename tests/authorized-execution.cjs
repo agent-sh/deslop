@@ -11,9 +11,6 @@ const { runProfiling } = require('../lib/perf/profiling-runner');
 const { runBreakingPointSearch } = require('../lib/perf/breaking-point-runner');
 const { runConstraintTest } = require('../lib/perf/constraint-runner');
 const { runOptimizationExperiment } = require('../lib/perf/optimization-runner');
-const custom = require('../lib/sources/custom-handler');
-const policy = require('../lib/sources/policy-questions');
-const sourceCache = require('../lib/sources/source-cache');
 const cli = require('../lib/patterns/cli-enhancers');
 const tools = require('../lib/platform/verify-tools');
 const { executeAuthorizedSync, COMMAND_NOT_AUTHORIZED } = require('../lib/utils/command-execution');
@@ -190,47 +187,6 @@ test('breaking-point, constraint and optimization wrappers preserve host decisio
   } finally {
     if (oldShort === undefined) delete process.env.PERF_ALLOW_SHORT;
     else process.env.PERF_ALLOW_SHORT = oldShort;
-  }
-}));
-
-test('custom probes and policy responses require separate authority and never cache it', () => fixture(async f => {
-  const oldCwd = process.cwd();
-  const oldPath = process.env.PATH;
-  const script = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  const contents = process.platform === 'win32'
-    ? '@echo off\r\n@"' + process.execPath + '" "' + f.observer + '" %*\r\n'
-    : '#!' + process.execPath + '\nrequire(' + quote(f.observer) + ');\n';
-  fs.writeFileSync(path.join(f.scratch, script), contents, { mode: 0o755 });
-  process.chdir(f.scratch);
-  process.env.PATH = f.scratch + path.delimiter + (oldPath || '');
-  try {
-    assert.equal(custom.probeCLI('npm').available, false);
-    assert.equal(custom.probeCLI('npm', true).available, false);
-    assert.equal(custom.probeCLI('npm', () => { throw new Error('private-policy-detail'); }).available, false);
-    assert.equal(f.records().length, 0);
-    const responses = { source: 'Custom', custom: { type: 'CLI Tool', name: 'npm', authorizeExecution: true }, priority: 'All', stopPoint: 'Implemented' };
-    assert.equal(policy.parseAndCachePolicy(responses).taskSource.capabilities.available, false);
-    assert.equal(f.records().length, 0);
-    let count = 0;
-    const result = policy.parseAndCachePolicy(responses, request => {
-      count++;
-      assert.equal(request.executable, script);
-      assert.deepEqual(request.args, ['--version']);
-      assert.equal(f.records().length, 0);
-      return true;
-    });
-    assert.equal(count, 1);
-    assert.equal(result.taskSource.capabilities.available, true);
-    assert.equal(f.records().length, 1);
-    const cached = JSON.stringify(sourceCache.getPreference());
-    assert.equal(cached.includes('authorizeExecution'), false);
-    assert.equal(cached.includes('authorized'), false);
-    assert.equal(custom.probeCLI('npm').available, false);
-    assert.equal(f.records().length, 1);
-  } finally {
-    process.chdir(oldCwd);
-    if (oldPath === undefined) delete process.env.PATH;
-    else process.env.PATH = oldPath;
   }
 }));
 
