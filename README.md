@@ -74,7 +74,7 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 
 1. `--cmd='["codex", "exec", "-p", "luna", "{prompt}"]'`: the command as a JSON array of strings, run without a shell. An element that is exactly `{prompt}` becomes the prompt; with none, the prompt goes to stdin.
 2. `DESLOP_SMALL_CMD`: the same JSON array, from the environment.
-3. The `ladder.small` rung in [Tower Crane](https://github.com/agent-sh/tower-crane)'s `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
+3. The `ladder.small` rung in Tower Crane's `project.json` (`$GISHRA_STATE/project.json`, else `.gishra/project.json` at the root of the main checkout):
 
 ```json
 { "harness": "codex", "ladder": { "small": { "profile": "luna", "effort": "low" } } }
@@ -89,7 +89,7 @@ Logic errors, edge cases and races need a reviewer, so deslop does not guess at 
 | `pi` | `pi -p <prompt> --model <model> --provider <provider> --thinking <effort>` |
 | `command` | the `command` array, with an element `{prompt}` replaced by the prompt (or the prompt on stdin) |
 
-The rung inherits the project's `harness` unless it names its own. Each rung comes from the project, then `GISHRA_CONFIG` (else `~/.config/gishra/config.json`), then the built-in Codex Luna rung. A configured rung that lacks the model, profile or command its harness needs, names an unsupported harness, or has fields that harness does not use is refused. Legacy `roles` files are refused; use `ladder`. Optional fields are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
+The rung inherits the project's `harness` unless it names its own. When the project file exists, each rung comes from it, then `GISHRA_CONFIG` (else `~/.config/gishra/config.json`), then the built-in Codex Luna rung. A configured rung that lacks the model, profile or command its harness needs, names an unsupported harness, or has fields that harness does not use is refused. Legacy `roles` files are refused; use `ladder`. Optional fields are left out; `args` are appended last. The step edits nothing, so no permission flags are passed. `--dry-run` prints the command that would run.
 
 With no model configured, `confirm.js` prints the findings ready to judge and exits 0; `/deslop` then hands them to `deslop-agent`, which uses the session's model. A reply that is not valid JSON in the expected shape, or that leaves a finding unjudged, is discarded: every finding comes back unconfirmed with an `error`. Prompts are batched to stay under the 128 KiB limit Linux puts on one argument.
 
@@ -119,15 +119,13 @@ With no model configured, `confirm.js` prints the findings ready to judge and ex
 
 ## Related plugins
 
-- [next-task](https://github.com/agent-sh/next-task) runs deslop before review
-- [audit-project](https://github.com/agent-sh/audit-project) for multi-agent review
+- [foreman](https://github.com/agent-sh/foreman) workers can run deslop on their diff before review
 
 ## Host authorization for command execution
 
-The bundled benchmark, profiling and custom-source helpers treat command strings and
-policy responses as data. They now deny process execution unless trusted host code
-supplies a separate synchronous `authorizeExecution(request)` callback. Only literal
-`true` approves a launch. Missing callbacks, JSON flags, promises and policy errors
+The bundled benchmark and profiling helpers treat command strings as data. They now
+deny process execution unless trusted host code supplies a separate synchronous
+`authorizeExecution(request)` callback. Only literal `true` approves a launch. Missing callbacks, JSON flags, promises and policy errors
 deny it. Authorization failures expose a generic error without policy details.
 
 Migration for callers:
@@ -138,20 +136,16 @@ Migration for callers:
 - `runBreakingPointSearch(options, authorizeExecution)`,
   `runConstraintTest(options, authorizeExecution)` and
   `runOptimizationExperiment(options, authorizeExecution)`
-- `probeCLI(toolName, authorizeExecution)`,
-  `buildCustomConfig(type, name, authorizeExecution)` and
-  `parseAndCachePolicy(responses, authorizeExecution)`
 
 Each launch has its own immutable request containing the final executable, argv,
 platform, Windows shim plan, absolute cwd, effective environment and spawn options.
 Approve that complete invocation from a trusted policy or an operator decision.
 Profiler overrides and optimization warmup are separate launches. Never construct the
 callback from remote input, deserialize executable JavaScript, or return `true`
-unconditionally for untrusted data. Authority is never saved in source preferences.
+unconditionally for untrusted data.
 
 `isToolAvailable(command)` and `checkTool(command, versionFlag)` now accept only their
 existing fixed availability checks. Unknown commands and flags return unavailable.
-Use the callback-bound custom probe for an operator-approved additional CLI.
 Pure parsing and Windows argument planning remain available without approval.
 
 Approval permits host execution. It does not isolate filesystem, network or credentials,
