@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Removed
+
+- The add-to-project workflow, which added new issues and PRs to the unused agent-sh project board and failed with an expired `PROJECT_TOKEN`.
+
 ### Added
 - One cleanup pass instead of separate tools. New checks: `changelog-missing` (a user-visible change, such as a new flag, env var, command or `feat:` commit over code, with nothing under `Unreleased`), `doc-example-stale` (a docs example running a slash command or package bin the change removed or renamed), `version-mismatch` (a version moved in one manifest of a package and not in another with the same exact name, such as `.claude-plugin/plugin.json`, or a new docs line pinning another version), `duplicate-code` (added code that already exists elsewhere, found by token fingerprints), `complexity` (ruff, the repository's eslint, golangci-lint or clippy complexity diagnostics on lines the change added; a language whose linter is missing is listed under `skipped`) and `agent-config` (agnix errors in agent files the change touched, when agnix is installed).
 - `scripts/confirm.js`: a small model confirms the detector's findings and returns fixes, each checked against the file. The model is an argv array, never a shell string: `--cmd` or `DESLOP_SMALL_CMD` as JSON, or the Tower Crane `ladder.small` rung (`claude`, `codex`, `opencode`, `agy`, `pi` or a `command` array, with optional model, profile, provider, effort and args); the prompt is one element or stdin. With no model configured it prints the findings for the calling agent to judge. A reply that leaves any finding unjudged is rejected, input missing some of the detector's findings is refused, detector check failures are carried as `detectorErrors`, and prompts are batched by UTF-8 bytes to stay under the exec argument limit. Only files inside the repository are read for context or accepted as fix targets; symlinks are not followed.
